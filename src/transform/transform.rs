@@ -343,10 +343,9 @@ impl<S: Schema> Transform<S> {
         let mut content = Fragment::new();
         for i in (0..wrappers.len()).rev() {
             if content.size() > 0 {
-                if let Some(match_) = wrappers[i].0.content_match().match_fragment(&content) {
-                    if !match_.valid_end() {
-                        return self;
-                    }
+                match wrappers[i].0.content_match().match_fragment(&content) {
+                    Some(match_) if match_.valid_end() => {}
+                    _ => return self,
                 }
             }
             content = Fragment::from(vec![wrappers[i].0.create_node(Some(&content), wrappers[i].1.as_ref())]);
