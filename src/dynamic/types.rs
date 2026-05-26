@@ -512,14 +512,46 @@ impl<'de> Deserialize<'de> for DynamicNode {
 // ---------------------------------------------------------------------------
 
 /// A dynamic mark value.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DynamicMark {
     /// The mark type name
     #[serde(rename = "type")]
     pub type_name: String,
     /// Attributes — omitted when null or empty so serialization matches ProseMirror JS output.
-    #[serde(default, skip_serializing_if = "is_default_attrs")]
+    #[serde(skip_serializing_if = "is_default_attrs")]
     pub attrs: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct DynamicMarkHelper {
+    #[serde(rename = "type")]
+    type_name: String,
+    #[serde(default)]
+    attrs: serde_json::Value,
+}
+
+impl<'de> Deserialize<'de> for DynamicMark {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let helper = DynamicMarkHelper::deserialize(deserializer)?;
+        if let Some(known) = with_types(|store| {
+            store
+                .mark_types
+                .iter()
+                .any(|mark_type| mark_type.name == helper.type_name)
+        }) {
+            if !known {
+                return Err(serde::de::Error::custom(format!(
+                    "Unknown mark type: {}",
+                    helper.type_name
+                )));
+            }
+        }
+
+        Ok(DynamicMark {
+            type_name: helper.type_name,
+            attrs: helper.attrs,
+        })
+    }
 }
 
 impl DynamicMark {
@@ -562,7 +594,10 @@ impl PartialEq for DynamicMark {
 }
 impl Eq for DynamicMark {}
 impl Hash for DynamicMark {
-    fn hash<H: Hasher>(&self, state: &mut H) { self.type_name.hash(state); }
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.type_name.hash(state);
+        self.attrs.hash(state);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -888,6 +923,28 @@ impl From<TextNode<Dyn>> for DynamicNode {
 mod tests {
     use super::DynamicMark;
     use serde_json::json;
+    use std::hash::{Hash, Hasher};
+
+    #[derive(Default)]
+    struct RecordingHasher {
+        bytes: Vec<u8>,
+    }
+
+    impl Hasher for RecordingHasher {
+        fn finish(&self) -> u64 {
+            0
+        }
+
+        fn write(&mut self, bytes: &[u8]) {
+            self.bytes.extend_from_slice(bytes);
+        }
+    }
+
+    fn hash_trace(mark: &DynamicMark) -> Vec<u8> {
+        let mut hasher = RecordingHasher::default();
+        mark.hash(&mut hasher);
+        hasher.bytes
+    }
 
     #[test]
     fn dynamic_mark_omits_null_and_empty_attrs() {
@@ -917,5 +974,26 @@ mod tests {
             .unwrap(),
             json!({ "type": "link", "attrs": { "href": "https://example.com" } })
         );
+    }
+
+    #[test]
+    fn dynamic_mark_hash_includes_attrs() {
+        let first = DynamicMark {
+            type_name: "link".to_string(),
+            attrs: json!({"href": "https://example.com/a"}),
+        };
+        let same = DynamicMark {
+            type_name: "link".to_string(),
+            attrs: json!({"href": "https://example.com/a"}),
+        };
+        let different = DynamicMark {
+            type_name: "link".to_string(),
+            attrs: json!({"href": "https://example.com/b"}),
+        };
+
+        assert_eq!(first, same);
+        assert_ne!(first, different);
+        assert_eq!(hash_trace(&first), hash_trace(&same));
+        assert_ne!(hash_trace(&first), hash_trace(&different));
     }
 }

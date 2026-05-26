@@ -361,8 +361,10 @@ impl DynamicSchema {
 
     /// Create a mark from a JSON value.
     pub fn mark_from_json(&self, json: &serde_json::Value) -> Result<DynamicMark, DynamicSchemaError> {
-        serde_json::from_value::<DynamicMark>(json.clone())
-            .map_err(|e| DynamicSchemaError::InvalidSpec(e.to_string()))
+        self.with_types(|| {
+            serde_json::from_value::<DynamicMark>(json.clone())
+                .map_err(|e| DynamicSchemaError::InvalidSpec(e.to_string()))
+        })
     }
 
     /// Create a text node with the given text.
@@ -388,8 +390,7 @@ impl DynamicSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{NodeType, ContentMatch};
-    
+    use crate::model::{ContentMatch, Mark, NodeType};
 
     fn basic_spec_json() -> serde_json::Value {
         serde_json::json!({
@@ -563,6 +564,61 @@ mod tests {
         let para = doc.child(0).unwrap();
         assert_eq!(para.r#type().idx, schema.node_type_map["paragraph"]);
         assert_eq!(para.child(0).unwrap().text_content(), "Hello world");
+    }
+
+    #[test]
+    fn test_mark_from_json_uses_schema_scope() {
+        let schema = DynamicSchema::from_json(&basic_spec_json()).unwrap();
+        let mark = schema
+            .mark_from_json(&serde_json::json!({
+                "type": "link",
+                "attrs": { "href": "https://example.com" }
+            }))
+            .unwrap();
+
+        assert_eq!(mark.type_name, "link");
+        assert_eq!(
+            mark.attrs.get("href").and_then(|value| value.as_str()),
+            Some("https://example.com")
+        );
+        schema.with_types(|| {
+            assert_eq!(mark.r#type().idx, schema.mark_type_map["link"]);
+        });
+    }
+
+    #[test]
+    fn test_mark_from_json_rejects_unknown_mark_types() {
+        let schema = DynamicSchema::from_json(&basic_spec_json()).unwrap();
+        let err = schema
+            .mark_from_json(&serde_json::json!({ "type": "missing" }))
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            DynamicSchemaError::InvalidSpec(message)
+                if message.contains("Unknown mark type") && message.contains("missing")
+        ));
+    }
+
+    #[test]
+    fn test_node_from_json_rejects_unknown_nested_mark_types() {
+        let schema = DynamicSchema::from_json(&basic_spec_json()).unwrap();
+        let err = schema
+            .node_from_json(&serde_json::json!({
+                "type": "paragraph",
+                "content": [{
+                    "type": "text",
+                    "text": "Hello",
+                    "marks": [{ "type": "missing" }]
+                }]
+            }))
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            DynamicSchemaError::InvalidSpec(message)
+                if message.contains("Unknown mark type") && message.contains("missing")
+        ));
     }
 
     #[test]
