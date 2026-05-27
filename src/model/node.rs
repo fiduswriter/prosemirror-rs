@@ -76,6 +76,11 @@ pub trait NodeType<S: Schema>: Copy + Clone + Debug + PartialEq + Eq {
         false
     }
 
+    /// Whitespace handling mode for this node type (e.g. "pre")
+    fn whitespace(self) -> Option<String> {
+        None
+    }
+
     /// Create a node of this type, filling in missing required child nodes
     /// if necessary. Returns None if the content cannot be made valid.
     fn create_and_fill(
@@ -342,12 +347,8 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
     }
 
     /// Get the node at the given document position.
-    /// Returns the node that covers the position (for non-text content positions,
-    /// returns the child node; for text positions, returns the text node).
+    /// Returns the deepest node that covers the position.
     fn node_at(&self, pos: usize) -> Option<&Self> {
-        if pos == 0 {
-            return Some(self);
-        }
         let content = self.content()?;
         content.node_at(pos)
     }

@@ -537,12 +537,30 @@ impl<S: Schema> Transform<S> {
 
     /// Add a node mark step.
     pub fn add_node_mark(&mut self, pos: usize, mark: S::Mark) -> &mut Self {
+        if let Some(node) = self.doc.node_at(pos) {
+            if let Some(marks) = node.marks() {
+                if marks.contains(&mark) {
+                    return self;
+                }
+            }
+        }
         let _ = self.maybe_step(Step::AddNodeMark(AddNodeMarkStep { pos, mark }));
         self
     }
 
     /// Remove a node mark step.
     pub fn remove_node_mark(&mut self, pos: usize, mark: S::Mark) -> &mut Self {
+        if let Some(node) = self.doc.node_at(pos) {
+            if let Some(marks) = node.marks() {
+                if !marks.contains(&mark) {
+                    return self;
+                }
+            } else {
+                return self;
+            }
+        } else {
+            return self;
+        }
         let _ = self.maybe_step(Step::RemoveNodeMark(RemoveNodeMarkStep { pos, mark }));
         self
     }
@@ -757,39 +775,131 @@ impl<S: Schema> Transform<S> {
         self
     }
 
+    /// Remove content that is not valid in the given parent type.
+    fn clear_incompatible(
+        &mut self,
+        pos: usize,
+        parent_type: S::NodeType,
+        mut match_: Option<S::ContentMatch>,
+        clear_newlines: bool,
+    ) {
+        let match_ = match_.get_or_insert_with(|| parent_type.content_match());
+        let child_count = match self.doc.node_at(pos) {
+            Some(n) => n.child_count(),
+            None => return,
+        };
+        let mut repl_spans = Vec::new();
+        let mut remove_marks = Vec::new();
+        let mut cur = pos + 1;
+        for i in 0..child_count {
+            let (end, allowed, marks, text_info) = {
+                let node = self.doc.node_at(pos).unwrap();
+                let child = match node.child(i) {
+                    Some(c) => c,
+                    None => continue,
+                };
+                let end = cur + child.node_size();
+                let allowed = match_.match_type(child.r#type());
+                let marks = child.marks().cloned();
+                let text_info = child.text_node().map(|t| t.text.as_str().to_string());
+                (end, allowed, marks, text_info)
+            };
+            if let Some(allowed) = allowed {
+                *match_ = allowed;
+                if let Some(ref marks) = marks {
+                    for mark in marks.iter() {
+                        if !parent_type.allows_mark_type(mark.r#type()) {
+                            remove_marks.push((cur, end, mark.clone()));
+                        }
+                    }
+                }
+                if clear_newlines {
+                    if let Some(text_str) = text_info {
+                        if parent_type.whitespace().as_deref() != Some("pre") {
+                            let mut offset = 0isize;
+                            for m in text_str.match_indices(['\n', '\r']) {
+                                let start = ((cur + m.0) as isize + offset) as usize;
+                                let newline_len = m.1.len();
+                                repl_spans.push((start, start + newline_len, false));
+                                offset += 1 - newline_len as isize;
+                            }
+                        }
+                    }
+                }
+            } else {
+                repl_spans.push((cur, end, true));
+            }
+            cur = end;
+        }
+        for (from, to, mark) in remove_marks {
+            self.maybe_step(Step::RemoveMark(RemoveMarkStep {
+                span: crate::transform::Span { from, to },
+                mark,
+            }));
+        }
+        if !match_.valid_end() {
+            if let Some(fill) = match_.fill_before(&Fragment::new(), true, 0) {
+                self.replace(cur, Some(cur), Some(Slice::new(fill, 0, 0)));
+            }
+        }
+        for (from, to, is_delete) in repl_spans.into_iter().rev() {
+            let slice = if is_delete {
+                Slice::default()
+            } else {
+                let space_node = S::Node::text(" ");
+                Slice::new(Fragment::from(vec![space_node]), 0, 0)
+            };
+            self.maybe_step(Step::Replace(ReplaceStep {
+                span: crate::transform::Span { from, to },
+                slice,
+                structure: false,
+            }));
+        }
+    }
+
     /// Change the type of textblocks in the given range.
-    pub fn set_block_type(&mut self, from: usize, to: usize, node_type: S::NodeType) -> &mut Self {
+    pub fn set_block_type(
+        &mut self,
+        from: usize,
+        to: usize,
+        node_type: S::NodeType,
+        attrs: Option<serde_json::Value>,
+    ) -> &mut Self {
         let map_from = self.steps.len();
-        // Walk through nodes and change block types
         if let Some(content) = self.doc.content() {
             let mut positions = Vec::new();
             content.nodes_between(
                 from,
                 to,
                 &mut |node, pos| {
-                    if node.is_block() && !node.is_text() && !node.is_leaf() {
-                        // This is a textblock candidate
-                        let mapped_pos = self.mapping.slice(map_from, None).map(pos, 1);
-                        positions.push((node.r#type(), mapped_pos, node.node_size()));
+                    if node.is_textblock() {
+                        positions.push((pos, node.node_size()));
+                        return false;
                     }
                     true
                 },
                 0,
             );
-            for (_, pos, size) in positions {
-                let mapped_end = self.mapping.slice(map_from, None).map(pos + size, 1);
+            for (pos, size) in positions {
+                let mapped_pos = self.mapping.slice(map_from, None).map(pos, 1);
+                if !super::structure::can_change_type::<S>(&self.doc, mapped_pos, node_type) {
+                    continue;
+                }
+                self.clear_incompatible(mapped_pos, node_type, None, true);
+                let mapping = self.mapping.slice(map_from, None);
+                let start_m = mapping.map(pos, 1);
+                let end_m = mapping.map(pos + size, 1);
+                let attrs_here = attrs.clone().unwrap_or(serde_json::Value::Null);
+                let marks = self.doc.node_at(start_m).and_then(|n| n.marks().cloned());
+                let new_node = node_type.create(attrs_here, None, marks.as_ref());
                 let _ = self.maybe_step(Step::ReplaceAround(ReplaceAroundStep {
                     span: crate::transform::Span {
-                        from: pos + 1,
-                        to: mapped_end - 1,
+                        from: start_m,
+                        to: end_m,
                     },
-                    gap_from: pos + 1,
-                    gap_to: mapped_end - 1,
-                    slice: Slice::new(
-                        Fragment::from(vec![node_type.create_node(None, None)]),
-                        0,
-                        0,
-                    ),
+                    gap_from: start_m + 1,
+                    gap_to: end_m - 1,
+                    slice: Slice::new(Fragment::from(vec![new_node]), 0, 0),
                     insert: 1,
                     structure: true,
                 }));
@@ -803,6 +913,7 @@ impl<S: Schema> Transform<S> {
         &mut self,
         pos: usize,
         node_type: Option<S::NodeType>,
+        attrs: Option<serde_json::Value>,
         marks: Option<MarkSet<S>>,
     ) -> &mut Self {
         let node = match self.doc.resolve(pos) {
@@ -811,13 +922,18 @@ impl<S: Schema> Transform<S> {
         };
         if let Some(node) = node {
             let type_ = node_type.unwrap_or_else(|| node.r#type());
-            let new_node = type_.create_node(None, marks.as_ref());
+            let marks = marks.or_else(|| node.marks().cloned());
+            let attrs = attrs.unwrap_or(serde_json::Value::Null);
+            let new_node = type_.create(attrs, None, marks.as_ref());
             if node.is_leaf() {
                 return self.replace_with(
                     pos,
                     pos + node.node_size(),
                     Fragment::from(vec![new_node]),
                 );
+            }
+            if !type_.valid_content(node.content().unwrap_or(&Fragment::new())) {
+                return self;
             }
             let _ = self.maybe_step(Step::ReplaceAround(ReplaceAroundStep {
                 span: crate::transform::Span {

@@ -302,6 +302,7 @@ impl DynamicSchema {
                 groups: groups_list,
                 attrs,
                 allowed_marks,
+                whitespace: node_spec.whitespace.clone(),
             });
         }
 

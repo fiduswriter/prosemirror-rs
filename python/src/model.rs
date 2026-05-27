@@ -115,12 +115,29 @@ fn extract_markset(obj: &Bound<'_, PyAny>) -> PyResult<MarkSet<Dyn>> {
         return Ok(set.borrow().inner.clone());
     }
     if let Ok(list) = obj.cast::<PyList>() {
-        let mut marks = MarkSet::new();
+        let mut marks = Vec::new();
+        let mut schema_opt: Option<Arc<DynamicSchema>> = None;
         for item in list.iter() {
-            let mark = item.cast::<PyMark>()?.borrow().inner.clone();
-            marks.add(&mark);
+            let py_mark = item.cast::<PyMark>()?;
+            let mark = py_mark.borrow().inner.clone();
+            if schema_opt.is_none() {
+                schema_opt = Some(py_mark.borrow().schema.clone());
+            }
+            marks.push(mark);
         }
-        return Ok(marks);
+        let mut mark_set = MarkSet::new();
+        if let Some(schema) = schema_opt {
+            schema.with_types(|| {
+                for mark in &marks {
+                    mark_set.add(mark);
+                }
+            });
+        } else {
+            for mark in &marks {
+                mark_set.add(mark);
+            }
+        }
+        return Ok(mark_set);
     }
     Err(PyValueError::new_err("Expected MarkSet or list of Mark"))
 }
@@ -356,6 +373,13 @@ impl PyNodeType {
         Ok(valid)
     }
 
+    fn allows_mark_type(&self, mark_type: &PyMarkType) -> PyResult<bool> {
+        let ok = self
+            .schema
+            .with_types(|| self.inner.allows_mark_type(mark_type.inner));
+        Ok(ok)
+    }
+
     fn __str__(&self) -> String {
         self.name.clone()
     }
@@ -372,7 +396,7 @@ impl PyNodeType {
 #[pyclass(name = "MarkType")]
 pub struct PyMarkType {
     schema: Arc<DynamicSchema>,
-    inner: DynamicMarkType,
+    pub(crate) inner: DynamicMarkType,
     name: String,
 }
 

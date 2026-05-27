@@ -310,6 +310,14 @@ fn add_range<S: Schema>(range: Range<S>, depth: usize, target: &mut Vec<S::Node>
             start_index += 1;
         }
     }
+    #[cfg(test)]
+    eprintln!(
+        "add_range depth={} start_index={} end_index={} node_type={}",
+        depth,
+        start_index,
+        end_index,
+        node.r#type().name()
+    );
     for i in start_index..end_index {
         add_node::<S>(Cow::Borrowed(node.child(i).unwrap()), target);
     }
@@ -349,6 +357,15 @@ fn replace_three_way<S: Schema>(
 
     let mut content = Vec::new();
     add_range(Range::Right(rp_from), depth, &mut content);
+    #[cfg(test)]
+    eprintln!(
+        "rt3 depth={} after Right(rp_from): content={:?}",
+        depth,
+        content
+            .iter()
+            .map(|n| n.r#type().name())
+            .collect::<Vec<_>>()
+    );
     match (open_start, open_end) {
         (Some(os), Some(oe)) if rp_start.index(depth) == rp_end.index(depth) => {
             check_join(os, oe)?;
@@ -362,15 +379,51 @@ fn replace_three_way<S: Schema>(
                 let closed = close(os, inner)?;
                 add_node::<S>(Cow::Owned(closed), &mut content);
             }
+            #[cfg(test)]
+            eprintln!(
+                "rt3 depth={} after open_start: content={:?}",
+                depth,
+                content
+                    .iter()
+                    .map(|n| n.r#type().name())
+                    .collect::<Vec<_>>()
+            );
             add_range(Range::Both(rp_start, rp_end), depth, &mut content);
+            #[cfg(test)]
+            eprintln!(
+                "rt3 depth={} after Both(rp_start, rp_end): content={:?}",
+                depth,
+                content
+                    .iter()
+                    .map(|n| n.r#type().name())
+                    .collect::<Vec<_>>()
+            );
             if let Some(oe) = open_end {
                 let inner = replace_two_way(rp_end, rp_to, depth + 1)?;
                 let closed = close(oe, inner)?;
                 add_node::<S>(Cow::Owned(closed), &mut content);
             }
+            #[cfg(test)]
+            eprintln!(
+                "rt3 depth={} after open_end: content={:?}",
+                depth,
+                content
+                    .iter()
+                    .map(|n| n.r#type().name())
+                    .collect::<Vec<_>>()
+            );
         }
     }
     add_range(Range::Left(rp_to), depth, &mut content);
+    #[cfg(test)]
+    eprintln!(
+        "rt3 depth={} after Left(rp_to): content={:?}",
+        depth,
+        content
+            .iter()
+            .map(|n| n.r#type().name())
+            .collect::<Vec<_>>()
+    );
     Ok(Fragment::from(content))
 }
 
@@ -381,13 +434,40 @@ fn replace_two_way<S: Schema>(
 ) -> Result<Fragment<S>, ReplaceError<S>> {
     let mut content = Vec::new();
     add_range(Range::Right(rp_from), depth, &mut content);
+    #[cfg(test)]
+    eprintln!(
+        "rt2 depth={} after Right(rp_from): content={:?}",
+        depth,
+        content
+            .iter()
+            .map(|n| n.r#type().name())
+            .collect::<Vec<_>>()
+    );
     if rp_from.depth > depth {
         let r#type = joinable(rp_from, rp_to, depth + 1)?;
         let inner = replace_two_way(rp_from, rp_to, depth + 1)?;
         let child = close(r#type, inner)?;
         add_node::<S>(Cow::Owned(child), &mut content);
     }
+    #[cfg(test)]
+    eprintln!(
+        "rt2 depth={} after recurse: content={:?}",
+        depth,
+        content
+            .iter()
+            .map(|n| n.r#type().name())
+            .collect::<Vec<_>>()
+    );
     add_range(Range::Left(rp_to), depth, &mut content);
+    #[cfg(test)]
+    eprintln!(
+        "rt2 depth={} after Left(rp_to): content={:?}",
+        depth,
+        content
+            .iter()
+            .map(|n| n.r#type().name())
+            .collect::<Vec<_>>()
+    );
     Ok(Fragment::from(content))
 }
 
@@ -616,4 +696,125 @@ mod tests {
             assert!(result.is_err());
         });
     }
+}
+
+#[test]
+fn test_node_at_behavior() {
+    use crate::dynamic::DynamicSchema;
+    use crate::model::{Fragment, Mark, MarkSet, Node};
+    let schema = DynamicSchema::from_json(&serde_json::json!({
+        "nodes": {
+            "doc": {"content": "p+", "marks": "comment"},
+            "p": {"content": "text*"},
+            "text": {}
+        },
+        "marks": {"comment": {"excludes": "", "attrs": {"id": {}}}}
+    }))
+    .unwrap();
+
+    schema.with_types(|| {
+        let mut marks = MarkSet::new();
+        let m1 = schema
+            .mark_from_json(&serde_json::json!({"type": "comment", "attrs": {"id": 1}}))
+            .unwrap();
+        let m2 = schema
+            .mark_from_json(&serde_json::json!({"type": "comment", "attrs": {"id": 2}}))
+            .unwrap();
+        marks = m1.add_to_set(std::borrow::Cow::Owned(marks)).into_owned();
+        marks = m2.add_to_set(std::borrow::Cow::Owned(marks)).into_owned();
+        println!("MarkSet len: {}", marks.len());
+
+        let doc = schema
+            .node(
+                "doc",
+                serde_json::Value::Null,
+                Fragment::from(vec![schema
+                    .node(
+                        "p",
+                        serde_json::Value::Null,
+                        Fragment::from(vec![schema.text("abc")]),
+                        marks.clone(),
+                    )
+                    .unwrap()]),
+                MarkSet::new(),
+            )
+            .unwrap();
+
+        println!("doc: {:?}", doc);
+        let node = doc.node_at(0).unwrap();
+        println!("node_at(0): {:?}", node);
+        println!("node_at(0) type: {:?}", node.r#type().name());
+        if let Some(node_marks) = node.marks() {
+            println!("node_at(0) marks count: {}", node_marks.len());
+        }
+    });
+}
+
+#[test]
+fn test_remove_node_mark_replace_debug() {
+    use crate::dynamic::DynamicSchema;
+    use crate::model::{Fragment, Mark, MarkSet, Node, Slice};
+    let schema = DynamicSchema::from_json(&serde_json::json!({
+        "nodes": {
+            "doc": {"content": "p+", "marks": "comment"},
+            "p": {"content": "text*"},
+            "text": {}
+        },
+        "marks": {"comment": {"excludes": "", "attrs": {"id": {}}}}
+    }))
+    .unwrap();
+
+    schema.with_types(|| {
+        let mut marks = MarkSet::new();
+        let m1 = schema
+            .mark_from_json(&serde_json::json!({"type": "comment", "attrs": {"id": 1}}))
+            .unwrap();
+        marks = m1.add_to_set(std::borrow::Cow::Owned(marks)).into_owned();
+
+        let doc = schema
+            .node(
+                "doc",
+                serde_json::Value::Null,
+                Fragment::from(vec![schema
+                    .node(
+                        "p",
+                        serde_json::Value::Null,
+                        Fragment::from(vec![schema.text("abc")]),
+                        marks.clone(),
+                    )
+                    .unwrap()]),
+                MarkSet::new(),
+            )
+            .unwrap();
+
+        let node = doc.node_at(0).unwrap();
+        let new_marks = m1
+            .remove_from_set(std::borrow::Cow::Borrowed(node.marks().unwrap()))
+            .into_owned();
+        let updated = node.mark(new_marks);
+        let slice = Slice::new(Fragment::from(vec![updated.clone()]), 0, 1);
+
+        let rp_from = doc.resolve(0).unwrap();
+        let rp_to = doc.resolve(1).unwrap();
+        println!(
+            "rp_from: pos={} depth={} index(0)={} parent_offset={} text_offset={}",
+            rp_from.pos,
+            rp_from.depth,
+            rp_from.index(0),
+            rp_from.parent_offset,
+            rp_from.text_offset()
+        );
+        println!(
+            "rp_to: pos={} depth={} index(0)={} index(1)={} parent_offset={} text_offset={}",
+            rp_to.pos,
+            rp_to.depth,
+            rp_to.index(0),
+            rp_to.index(1),
+            rp_to.parent_offset,
+            rp_to.text_offset()
+        );
+
+        let result = doc.replace(0..1, &slice).unwrap();
+        println!("result: {:?}", result);
+    });
 }

@@ -70,6 +70,8 @@ pub struct DynamicNodeTypeData {
     pub attrs: HashMap<String, serde_json::Value>,
     /// The set of allowed mark type names (None = all allowed)
     pub allowed_marks: Option<Vec<String>>,
+    /// Whitespace handling mode
+    pub whitespace: Option<String>,
 }
 
 /// Runtime data for a dynamic mark type.
@@ -1090,6 +1092,15 @@ impl NodeType<Dyn> for DynamicNodeType {
     }
     fn inline_content(self) -> bool {
         with_types(|store| store.node_types[self.idx].has_inline_content).unwrap_or(false)
+    }
+    fn whitespace(self) -> Option<String> {
+        with_types(|store| {
+            store
+                .node_types
+                .get(self.idx)
+                .and_then(|nt| nt.whitespace.clone())
+        })
+        .unwrap_or(None)
     }
 
     fn create_node(

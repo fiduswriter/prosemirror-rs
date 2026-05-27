@@ -1,15 +1,15 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyList;
+use pyo3::types::{PyDict, PyList};
 use std::sync::Arc;
 
 use crate::model::{
-    json_to_py, py_to_json, PyFragment, PyMark, PyNode, PyNodeRange, PyNodeType, PyResolvedPos,
-    PySchema,
+    json_to_py, py_to_json, PyFragment, PyMark, PyMarkType, PyNode, PyNodeRange, PyNodeType,
+    PyResolvedPos, PySchema,
 };
 use prosemirror::dynamic::types::{Dyn, DynamicNode, DynamicNodeType};
 use prosemirror::dynamic::DynamicSchema;
-use prosemirror::model::{MarkSet, NodeType as _, Schema, Slice};
+use prosemirror::model::{Mark, MarkSet, Node, NodeType as _, Schema, Slice};
 use prosemirror::transform::{
     map::{MapResult, Mappable, Mapping, StepMap},
     structure::{
@@ -43,10 +43,12 @@ impl PyStepMap {
         self.inner.ranges.clone()
     }
 
+    #[pyo3(signature = (pos, assoc = 1))]
     fn map(&self, pos: usize, assoc: i32) -> usize {
         self.inner.map(pos, assoc)
     }
 
+    #[pyo3(signature = (pos, assoc = 1))]
     fn map_result(&self, pos: usize, assoc: i32) -> PyMapResult {
         PyMapResult {
             inner: self.inner.map_result(pos, assoc),
@@ -162,10 +164,12 @@ impl PyMapping {
         }
     }
 
+    #[pyo3(signature = (pos, assoc = 1))]
     fn map(&self, pos: usize, assoc: i32) -> usize {
         self.inner.map(pos, assoc)
     }
 
+    #[pyo3(signature = (pos, assoc = 1))]
     fn map_result(&self, pos: usize, assoc: i32) -> PyMapResult {
         PyMapResult {
             inner: self.inner.map_result(pos, assoc),
@@ -553,13 +557,48 @@ impl PyTransform {
         Ok(slf.clone().unbind())
     }
 
-    fn remove_node_mark(slf: &Bound<'_, Self>, pos: usize, mark: &PyMark) -> PyResult<Py<Self>> {
-        {
+    fn remove_node_mark(
+        slf: &Bound<'_, Self>,
+        pos: usize,
+        mark: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<Self>> {
+        let schema = slf.borrow().schema.clone();
+        if let Ok(mark_type) = mark.cast::<PyMarkType>() {
+            let target_idx = mark_type.borrow().inner.idx;
+            let marks_to_remove: Vec<crate::model::PyMark> = {
+                let this = slf.borrow();
+                schema.with_types(|| {
+                    this.inner
+                        .doc
+                        .node_at(pos)
+                        .and_then(|node| node.marks())
+                        .map(|mark_set| {
+                            mark_set
+                                .iter()
+                                .filter(|m| m.r#type().idx == target_idx)
+                                .map(|m| crate::model::PyMark {
+                                    schema: this.schema.clone(),
+                                    inner: m.clone(),
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                })
+            };
+            for mark in marks_to_remove {
+                let mut this = slf.borrow_mut();
+                schema.with_types(|| {
+                    this.inner.remove_node_mark(pos, mark.inner);
+                });
+            }
+        } else if let Ok(mark) = mark.cast::<PyMark>() {
             let mut this = slf.borrow_mut();
-            let schema = this.schema.clone();
             schema.with_types(|| {
-                this.inner.remove_node_mark(pos, mark.inner.clone());
+                this.inner
+                    .remove_node_mark(pos, mark.borrow().inner.clone());
             });
+        } else {
+            return Err(PyValueError::new_err("mark must be a Mark or MarkType"));
         }
         Ok(slf.clone().unbind())
     }
@@ -677,13 +716,59 @@ impl PyTransform {
         Ok(slf.clone().unbind())
     }
 
+    #[pyo3(signature = (from, to, node_type, attrs = None))]
     fn set_block_type(
         slf: &Bound<'_, Self>,
         from: usize,
         to: usize,
         node_type: &PyNodeType,
+        attrs: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<Self>> {
-        {
+        let schema = slf.borrow().schema.clone();
+        let is_callable = attrs.map(|a| a.is_callable()).unwrap_or(false);
+
+        if is_callable {
+            let doc = slf.borrow().inner.doc.clone();
+            let mut nodes = Vec::new();
+            schema.with_types(|| {
+                use prosemirror::model::Node;
+                if let Some(content) = doc.content() {
+                    content.nodes_between(
+                        from,
+                        to,
+                        &mut |node: &DynamicNode, pos: usize| {
+                            if node.is_textblock() {
+                                nodes.push((pos, node.clone()));
+                                return false;
+                            }
+                            true
+                        },
+                        0,
+                    );
+                }
+            });
+            let py = slf.py();
+            let nt = DynamicNodeType {
+                idx: node_type.inner.idx,
+            };
+            for (orig_pos, node) in nodes {
+                let py_node = crate::model::PyNode {
+                    schema: schema.clone(),
+                    inner: node,
+                };
+                let py_node_bound = Bound::new(py, py_node)?;
+                let result = attrs.unwrap().call1((py_node_bound,))?;
+                let attrs_json = crate::model::py_to_json(&result)?;
+                let mapped_pos = slf.borrow().inner.mapping.map(orig_pos, 1);
+                let mut this = slf.borrow_mut();
+                let schema = this.schema.clone();
+                schema.with_types(|| {
+                    this.inner
+                        .set_node_markup(mapped_pos, Some(nt), Some(attrs_json), None);
+                });
+            }
+        } else {
+            let attrs = attrs.map(crate::model::py_to_json).transpose()?;
             let mut this = slf.borrow_mut();
             let schema = this.schema.clone();
             schema.with_types(|| {
@@ -693,20 +778,23 @@ impl PyTransform {
                     DynamicNodeType {
                         idx: node_type.inner.idx,
                     },
+                    attrs,
                 );
             });
         }
         Ok(slf.clone().unbind())
     }
 
-    #[pyo3(signature = (pos, node_type = None, marks = None))]
+    #[pyo3(signature = (pos, node_type = None, attrs = None, marks = None))]
     fn set_node_markup(
         slf: &Bound<'_, Self>,
         pos: usize,
         node_type: Option<&PyNodeType>,
+        attrs: Option<&Bound<'_, PyAny>>,
         marks: Option<&Bound<'_, PyList>>,
     ) -> PyResult<Py<Self>> {
         let node_type = node_type.map(|nt| DynamicNodeType { idx: nt.inner.idx });
+        let attrs = attrs.map(py_to_json).transpose()?;
         let marks = marks
             .map(|list| {
                 let mut mark_set = MarkSet::new();
@@ -721,14 +809,19 @@ impl PyTransform {
             let mut this = slf.borrow_mut();
             let schema = this.schema.clone();
             schema.with_types(|| {
-                this.inner.set_node_markup(pos, node_type, marks);
+                this.inner.set_node_markup(pos, node_type, attrs, marks);
             });
         }
         Ok(slf.clone().unbind())
     }
 
-    fn changed_range(&self) -> PyResult<Option<(usize, usize)>> {
-        Ok(self.inner.changed_range())
+    fn changed_range<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
+        Ok(self.inner.changed_range().map(|(from, to)| {
+            let dict = PyDict::new(py);
+            dict.set_item("from", from).unwrap();
+            dict.set_item("to", to).unwrap();
+            dict
+        }))
     }
 }
 
