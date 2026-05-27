@@ -346,6 +346,7 @@ fn prosemirror_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<transform::PyStep>()?;
     m.add_class::<transform::PyTransform>()?;
     m.add_class::<model::PyNodeRange>()?;
+    m.add_class::<model::PyContentMatch>()?;
     m.add_function(wrap_pyfunction!(transform::py_lift_target, m)?)?;
     m.add_function(wrap_pyfunction!(transform::py_can_split, m)?)?;
     m.add_function(wrap_pyfunction!(transform::py_find_wrapping, m)?)?;

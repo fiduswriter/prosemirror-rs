@@ -68,6 +68,8 @@ enum ExprAtom {
     Inline,
     /// Any block node
     Block,
+    /// A parenthesized sub-expression (alternatives of sequences)
+    Nested(Vec<Vec<ExprElement>>),
 }
 
 /// A content expression element with a quantifier.
@@ -90,6 +92,8 @@ enum Quantifier {
     Star,
     /// One or more
     Plus,
+    /// A counted range: min required, max optional (None = unbounded)
+    Range { min: usize, max: Option<usize> },
 }
 
 /// Token in the content expression lexer.
@@ -107,6 +111,14 @@ enum Token {
     OpenParen,
     /// `)`
     CloseParen,
+    /// `{`
+    OpenBrace,
+    /// `}`
+    CloseBrace,
+    /// `,`
+    Comma,
+    /// A number literal
+    Number(usize),
     /// End of input
     Eof,
 }
@@ -156,6 +168,29 @@ impl Lexer {
             ')' => {
                 self.pos += 1;
                 Ok(Token::CloseParen)
+            }
+            '{' => {
+                self.pos += 1;
+                Ok(Token::OpenBrace)
+            }
+            '}' => {
+                self.pos += 1;
+                Ok(Token::CloseBrace)
+            }
+            ',' => {
+                self.pos += 1;
+                Ok(Token::Comma)
+            }
+            _ if c.is_ascii_digit() => {
+                let start = self.pos;
+                while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
+                    self.pos += 1;
+                }
+                let num_str: String = self.input[start..self.pos].iter().collect();
+                let num = num_str
+                    .parse()
+                    .map_err(|_| ContentExprError::InvalidOperator)?;
+                Ok(Token::Number(num))
             }
             _ if c.is_alphanumeric() || c == '_' || c == '-' => {
                 let start = self.pos;
@@ -274,22 +309,17 @@ fn parse_sequence(
                     Token::CloseParen => {}
                     _ => return Err(ContentExprError::MismatchedParens),
                 }
-                if inner.len() == 1 && inner[0].len() == 1 {
-                    let quantifier = parse_quantifier(lexer)?;
+                let quantifier = parse_quantifier(lexer)?;
+                if quantifier == Quantifier::Once && inner.len() == 1 {
+                    // Flatten single-alternative parenthesized sequences
+                    for elem in inner.into_iter().next().unwrap() {
+                        elements.push(elem);
+                    }
+                } else {
                     elements.push(ExprElement {
-                        atom: inner[0][0].atom.clone(),
+                        atom: ExprAtom::Nested(inner),
                         quantifier,
                     });
-                } else {
-                    let quantifier = parse_quantifier(lexer)?;
-                    if let Some(first_alt) = inner.first() {
-                        if let Some(first_elem) = first_alt.first() {
-                            elements.push(ExprElement {
-                                atom: first_elem.atom.clone(),
-                                quantifier,
-                            });
-                        }
-                    }
                 }
             }
             Token::Eof | Token::Pipe | Token::CloseParen => {
@@ -310,6 +340,30 @@ fn parse_quantifier(lexer: &mut Lexer) -> Result<Quantifier, ContentExprError> {
         Token::Plus => Ok(Quantifier::Plus),
         Token::Star => Ok(Quantifier::Star),
         Token::Question => Ok(Quantifier::Optional),
+        Token::OpenBrace => {
+            let min = match lexer.next_token()? {
+                Token::Number(n) => n,
+                _ => return Err(ContentExprError::InvalidOperator),
+            };
+            match lexer.next_token()? {
+                Token::CloseBrace => Ok(Quantifier::Range {
+                    min,
+                    max: Some(min),
+                }),
+                Token::Comma => match lexer.next_token()? {
+                    Token::CloseBrace => Ok(Quantifier::Range { min, max: None }),
+                    Token::Number(max) => match lexer.next_token()? {
+                        Token::CloseBrace => Ok(Quantifier::Range {
+                            min,
+                            max: Some(max),
+                        }),
+                        _ => Err(ContentExprError::InvalidOperator),
+                    },
+                    _ => Err(ContentExprError::InvalidOperator),
+                },
+                _ => Err(ContentExprError::InvalidOperator),
+            }
+        }
         _ => {
             lexer.pos = saved;
             Ok(Quantifier::Once)
@@ -326,6 +380,45 @@ struct NfaState {
     edges: Vec<(String, usize)>,
     /// Whether this is an accepting state
     valid_end: bool,
+}
+
+/// Copy a nested NFA into the parent NFA, returning (start_state, merge_state).
+fn copy_nested_nfa(
+    states: &mut Vec<NfaState>,
+    nested_alts: &[Vec<ExprElement>],
+    groups: &HashMap<String, Vec<String>>,
+) -> Result<(usize, usize), ContentExprError> {
+    let nested_nfa = build_nfa(nested_alts, groups)?;
+    let offset = states.len();
+    for state in &nested_nfa {
+        let mut state = state.clone();
+        for e in &mut state.epsilon {
+            *e += offset;
+        }
+        for (_, e) in &mut state.edges {
+            *e += offset;
+        }
+        state.valid_end = false;
+        states.push(state);
+    }
+    let start = offset;
+    let accepts: Vec<usize> = nested_nfa
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.valid_end)
+        .map(|(i, _)| i + offset)
+        .collect();
+    // Create a merge state for all accept states
+    let merge = states.len();
+    states.push(NfaState {
+        epsilon: Vec::new(),
+        edges: Vec::new(),
+        valid_end: false,
+    });
+    for &acc in &accepts {
+        states[acc].epsilon.push(merge);
+    }
+    Ok((start, merge))
 }
 
 fn build_nfa(
@@ -348,74 +441,222 @@ fn build_nfa(
         let mut current = 0; // start state
 
         for elem in alt {
-            let node_names = resolve_atom(&elem.atom, groups)?;
+            match &elem.atom {
+                ExprAtom::Nested(nested_alts) => {
+                    match elem.quantifier {
+                        Quantifier::Once => {
+                            let (start, merge) = copy_nested_nfa(&mut states, nested_alts, groups)?;
+                            states[current].epsilon.push(start);
+                            current = merge;
+                        }
+                        Quantifier::Optional => {
+                            let (start, merge) = copy_nested_nfa(&mut states, nested_alts, groups)?;
+                            let next = states.len();
+                            states.push(NfaState {
+                                epsilon: Vec::new(),
+                                edges: Vec::new(),
+                                valid_end: false,
+                            });
+                            states[current].epsilon.push(next); // skip
+                            states[current].epsilon.push(start); // match
+                            states[merge].epsilon.push(next); // done
+                            current = next;
+                        }
+                        Quantifier::Star => {
+                            let (start, merge) = copy_nested_nfa(&mut states, nested_alts, groups)?;
+                            let next = states.len();
+                            states.push(NfaState {
+                                epsilon: Vec::new(),
+                                edges: Vec::new(),
+                                valid_end: false,
+                            });
+                            states[current].epsilon.push(next); // skip
+                            states[current].epsilon.push(start); // match
+                            states[merge].epsilon.push(start); // loop back
+                            states[merge].epsilon.push(next); // done
+                            current = next;
+                        }
+                        Quantifier::Plus => {
+                            let (start, merge) = copy_nested_nfa(&mut states, nested_alts, groups)?;
+                            let next = states.len();
+                            states.push(NfaState {
+                                epsilon: Vec::new(),
+                                edges: Vec::new(),
+                                valid_end: false,
+                            });
+                            states[current].epsilon.push(start); // must match once
+                            states[merge].epsilon.push(start); // loop back
+                            states[merge].epsilon.push(next); // done
+                            current = next;
+                        }
+                        Quantifier::Range { min, max } => {
+                            let mut prev = current;
+                            for _ in 0..min {
+                                let (start, merge) =
+                                    copy_nested_nfa(&mut states, nested_alts, groups)?;
+                                states[prev].epsilon.push(start);
+                                prev = merge;
+                            }
+                            match max {
+                                Some(max) if max > min => {
+                                    for _ in min..max {
+                                        let (start, merge) =
+                                            copy_nested_nfa(&mut states, nested_alts, groups)?;
+                                        let next = states.len();
+                                        states.push(NfaState {
+                                            epsilon: Vec::new(),
+                                            edges: Vec::new(),
+                                            valid_end: false,
+                                        });
+                                        states[prev].epsilon.push(next); // skip
+                                        states[prev].epsilon.push(start); // match
+                                        states[merge].epsilon.push(next); // done
+                                        prev = next;
+                                    }
+                                    current = prev;
+                                }
+                                None => {
+                                    let (start, merge) =
+                                        copy_nested_nfa(&mut states, nested_alts, groups)?;
+                                    let next = states.len();
+                                    states.push(NfaState {
+                                        epsilon: Vec::new(),
+                                        edges: Vec::new(),
+                                        valid_end: false,
+                                    });
+                                    states[prev].epsilon.push(next); // skip
+                                    states[prev].epsilon.push(start); // match
+                                    states[merge].epsilon.push(start); // loop back
+                                    states[merge].epsilon.push(next); // done
+                                    current = next;
+                                }
+                                _ => {
+                                    current = prev;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    let node_names = resolve_atom(&elem.atom, groups)?;
 
-            match elem.quantifier {
-                Quantifier::Once => {
-                    let next = states.len();
-                    states.push(NfaState {
-                        epsilon: Vec::new(),
-                        edges: Vec::new(),
-                        valid_end: false,
-                    });
-                    for name in &node_names {
-                        states[current].edges.push((name.clone(), next));
+                    match elem.quantifier {
+                        Quantifier::Once => {
+                            let next = states.len();
+                            states.push(NfaState {
+                                epsilon: Vec::new(),
+                                edges: Vec::new(),
+                                valid_end: false,
+                            });
+                            for name in &node_names {
+                                states[current].edges.push((name.clone(), next));
+                            }
+                            current = next;
+                        }
+                        Quantifier::Optional => {
+                            let next = states.len();
+                            states.push(NfaState {
+                                epsilon: Vec::new(),
+                                edges: Vec::new(),
+                                valid_end: false,
+                            });
+                            // Epsilon transition (skip)
+                            states[current].epsilon.push(next);
+                            // Or match and advance
+                            for name in &node_names {
+                                states[current].edges.push((name.clone(), next));
+                            }
+                            current = next;
+                        }
+                        Quantifier::Star => {
+                            let next = states.len();
+                            states.push(NfaState {
+                                epsilon: Vec::new(),
+                                edges: Vec::new(),
+                                valid_end: false,
+                            });
+                            // Epsilon transition (skip)
+                            states[current].epsilon.push(next);
+                            // Or match and loop back
+                            for name in &node_names {
+                                states[current].edges.push((name.clone(), current));
+                            }
+                            current = next;
+                        }
+                        Quantifier::Plus => {
+                            // First, match at least one
+                            let mid = states.len();
+                            states.push(NfaState {
+                                epsilon: Vec::new(),
+                                edges: Vec::new(),
+                                valid_end: false,
+                            });
+                            for name in &node_names {
+                                states[current].edges.push((name.clone(), mid));
+                            }
+                            let next = states.len();
+                            states.push(NfaState {
+                                epsilon: Vec::new(),
+                                edges: Vec::new(),
+                                valid_end: false,
+                            });
+                            // From mid, can loop back or advance
+                            states[mid].epsilon.push(next);
+                            for name in &node_names {
+                                states[mid].edges.push((name.clone(), mid));
+                            }
+                            current = next;
+                        }
+                        Quantifier::Range { min, max } => {
+                            // Emit `min` required copies
+                            for _ in 0..min {
+                                let next = states.len();
+                                states.push(NfaState {
+                                    epsilon: Vec::new(),
+                                    edges: Vec::new(),
+                                    valid_end: false,
+                                });
+                                for name in &node_names {
+                                    states[current].edges.push((name.clone(), next));
+                                }
+                                current = next;
+                            }
+                            match max {
+                                Some(max) if max > min => {
+                                    // Emit optional copies up to max
+                                    for _ in min..max {
+                                        let next = states.len();
+                                        states.push(NfaState {
+                                            epsilon: Vec::new(),
+                                            edges: Vec::new(),
+                                            valid_end: false,
+                                        });
+                                        states[current].epsilon.push(next); // skip
+                                        for name in &node_names {
+                                            states[current].edges.push((name.clone(), next));
+                                        }
+                                        current = next;
+                                    }
+                                }
+                                None => {
+                                    // Unbounded: star after the required copies
+                                    let next = states.len();
+                                    states.push(NfaState {
+                                        epsilon: Vec::new(),
+                                        edges: Vec::new(),
+                                        valid_end: false,
+                                    });
+                                    states[current].epsilon.push(next); // skip
+                                    for name in &node_names {
+                                        states[current].edges.push((name.clone(), current));
+                                        // loop
+                                    }
+                                    current = next;
+                                }
+                                _ => {} // max == min, no optional copies
+                            }
+                        }
                     }
-                    current = next;
-                }
-                Quantifier::Optional => {
-                    let next = states.len();
-                    states.push(NfaState {
-                        epsilon: Vec::new(),
-                        edges: Vec::new(),
-                        valid_end: false,
-                    });
-                    // Epsilon transition (skip)
-                    states[current].epsilon.push(next);
-                    // Or match and advance
-                    for name in &node_names {
-                        states[current].edges.push((name.clone(), next));
-                    }
-                    current = next;
-                }
-                Quantifier::Star => {
-                    let next = states.len();
-                    states.push(NfaState {
-                        epsilon: Vec::new(),
-                        edges: Vec::new(),
-                        valid_end: false,
-                    });
-                    // Epsilon transition (skip)
-                    states[current].epsilon.push(next);
-                    // Or match and loop back
-                    for name in &node_names {
-                        states[current].edges.push((name.clone(), current));
-                    }
-                    current = next;
-                }
-                Quantifier::Plus => {
-                    // First, match at least one
-                    let mid = states.len();
-                    states.push(NfaState {
-                        epsilon: Vec::new(),
-                        edges: Vec::new(),
-                        valid_end: false,
-                    });
-                    for name in &node_names {
-                        states[current].edges.push((name.clone(), mid));
-                    }
-                    let next = states.len();
-                    states.push(NfaState {
-                        epsilon: Vec::new(),
-                        edges: Vec::new(),
-                        valid_end: false,
-                    });
-                    // From mid, can loop back or advance
-                    states[mid].epsilon.push(next);
-                    for name in &node_names {
-                        states[mid].edges.push((name.clone(), mid));
-                    }
-                    current = next;
                 }
             }
         }
@@ -426,22 +667,6 @@ fn build_nfa(
     // Mark accept states
     for &s in &accept_states {
         states[s].valid_end = true;
-    }
-
-    // Also propagate epsilon reachability to accept states
-    let n = states.len();
-    let mut epsilon_closure = vec![Vec::new(); n];
-    for (i, closure) in epsilon_closure.iter_mut().enumerate() {
-        let mut visited = std::collections::HashSet::new();
-        let mut stack = vec![i];
-        while let Some(s) = stack.pop() {
-            if visited.insert(s) {
-                for &next in &states[s].epsilon {
-                    stack.push(next);
-                }
-            }
-        }
-        *closure = visited.into_iter().collect();
     }
 
     Ok(states)
@@ -457,6 +682,11 @@ fn resolve_atom(
             .get(name)
             .cloned()
             .ok_or_else(|| ContentExprError::UnknownRef(name.clone())),
+        ExprAtom::Nested(_) => {
+            panic!(
+                "Nested expressions should be handled directly in build_nfa, not resolved to names"
+            )
+        }
         ExprAtom::Inline => {
             // Collect all inline types from groups
             let mut names = Vec::new();
@@ -523,8 +753,9 @@ fn nfa_to_dfa(nfa: &[NfaState]) -> ContentExpr {
         queue_idx += 1;
 
         // Collect all possible transitions from this set
+        // Iterate in reverse order to match JS edge ordering (descending NFA state order)
         let mut transitions: IndexMap<String, Vec<usize>> = IndexMap::new();
-        for &state in &current_set {
+        for &state in current_set.iter().rev() {
             for (name, target) in &nfa[state].edges {
                 transitions
                     .entry(name.clone())

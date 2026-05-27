@@ -1,6 +1,7 @@
 //! Dynamic runtime types for nodes, marks, and their type descriptors.
 
-use crate::dynamic::content_expr::ContentExpr;
+use crate::dynamic::content_expr::{ContentExpr, ContentExprError};
+use crate::dynamic::DynamicSchema;
 use crate::model::MarkType;
 use crate::model::{ContentMatch, Fragment, Mark, MarkSet, Node, NodeType, Schema, Text, TextNode};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -376,8 +377,114 @@ impl ContentMatch<Dyn> for DynamicContentMatch {
     }
 }
 
+/// A `ContentMatch`-like object created by parsing a content expression
+/// string against a specific schema's node types. Unlike `DynamicContentMatch`,
+/// this holds the parsed `ContentExpr` directly and does not rely on the
+/// global `DYN_TYPES` thread-local.
+#[derive(Clone)]
+pub struct ParsedContentMatch {
+    expr: ContentExpr,
+    schema: std::sync::Arc<DynamicSchema>,
+    state: usize,
+}
+
+impl fmt::Debug for ParsedContentMatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ParsedContentMatch")
+            .field("expr", &self.expr)
+            .field("state", &self.state)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ParsedContentMatch {
+    /// Parse a content expression string using the node types from the given schema.
+    pub fn parse(
+        expr_str: &str,
+        schema: &std::sync::Arc<DynamicSchema>,
+    ) -> Result<Self, ContentExprError> {
+        let mut groups: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for (group_name, indices) in &schema.node_groups {
+            let names: Vec<String> = indices
+                .iter()
+                .map(|&i| schema.node_types[i].name.clone())
+                .collect();
+            groups.insert(group_name.clone(), names);
+        }
+
+        let expr = crate::dynamic::content_expr::parse_content_expr(expr_str, &groups)?;
+        Ok(ParsedContentMatch {
+            expr,
+            schema: schema.clone(),
+            state: 0,
+        })
+    }
+
+    /// Whether this match state represents a valid end of the content expression.
+    pub fn valid_end(&self) -> bool {
+        self.expr.valid_end(self.state)
+    }
+
+    /// Match a single node type, returning the next match state if successful.
+    pub fn match_type(&self, node_type: DynamicNodeType) -> Option<Self> {
+        let name = self.schema.node_types.get(node_type.idx)?.name.clone();
+        let next_state = self.expr.match_type(self.state, &name)?;
+        Some(ParsedContentMatch {
+            expr: self.expr.clone(),
+            schema: self.schema.clone(),
+            state: next_state,
+        })
+    }
+
+    /// Match a fragment of nodes, returning the final match state if successful.
+    pub fn match_fragment(&self, fragment: &Fragment<Dyn>) -> Option<Self> {
+        let mut state = self.state;
+        for i in 0..fragment.child_count() {
+            let child = fragment.child(i);
+            let name = self.schema.node_types.get(child.r#type().idx)?.name.clone();
+            state = self.expr.match_type(state, &name)?;
+        }
+        Some(ParsedContentMatch {
+            expr: self.expr.clone(),
+            schema: self.schema.clone(),
+            state,
+        })
+    }
+
+    /// Try to find a fragment of nodes that can be inserted before `after`
+    /// to make the content match.
+    pub fn fill_before(
+        &self,
+        after: &Fragment<Dyn>,
+        to_end: bool,
+        start_index: usize,
+    ) -> Option<Fragment<Dyn>> {
+        self.schema.with_types(|| {
+            with_types(|store| {
+                let mut seen = std::collections::HashSet::new();
+                seen.insert(self.state);
+                let mut types = Vec::new();
+                let result = fill_before_search(
+                    &self.expr,
+                    self.state,
+                    after,
+                    start_index,
+                    to_end,
+                    &mut seen,
+                    &mut types,
+                    store,
+                    0,
+                )?;
+                Some(Fragment::from(result))
+            })
+            .flatten()
+        })
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-fn fill_before_search(
+pub(crate) fn fill_before_search(
     expr: &ContentExpr,
     state: usize,
     after: &Fragment<Dyn>,
@@ -649,7 +756,7 @@ impl Eq for DynamicNode {}
 struct DynamicNodeHelper {
     #[serde(rename = "type")]
     type_name: String,
-    #[serde(default, skip_serializing_if = "is_default_attrs")]
+    #[serde(default = "default_attrs", skip_serializing_if = "is_default_attrs")]
     attrs: serde_json::Value,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     content: Vec<DynamicNode>,
@@ -665,6 +772,10 @@ fn is_default_attrs(v: &serde_json::Value) -> bool {
         serde_json::Value::Null => true,
         _ => false,
     }
+}
+
+fn default_attrs() -> serde_json::Value {
+    serde_json::json!({})
 }
 
 impl Serialize for DynamicNode {
@@ -1063,7 +1174,7 @@ impl Node<Dyn> for DynamicNode {
         DynamicNode {
             type_idx,
             type_name: "text".to_string(),
-            attrs: serde_json::Value::Null,
+            attrs: serde_json::json!({}),
             marks: node.marks.clone(),
             inner: DynNodeInner::Text(node),
         }
@@ -1082,7 +1193,7 @@ impl Node<Dyn> for DynamicNode {
         DynamicNode {
             type_idx,
             type_name: "text".to_string(),
-            attrs: serde_json::Value::Null,
+            attrs: serde_json::json!({}),
             marks: MarkSet::new(),
             inner: DynNodeInner::Text(TextNode {
                 text: Text::from(s),
@@ -1273,7 +1384,7 @@ impl From<TextNode<Dyn>> for DynamicNode {
         DynamicNode {
             type_idx,
             type_name: "text".to_string(),
-            attrs: serde_json::Value::Null,
+            attrs: serde_json::json!({}),
             marks: tn.marks.clone(),
             inner: DynNodeInner::Text(tn),
         }

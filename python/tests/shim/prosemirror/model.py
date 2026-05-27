@@ -8,6 +8,7 @@ from prosemirror_rs import (
     Mark,
     MarkType,
     MarkSet,
+    ContentMatch,
 )
 
 # Upstream-compatible class attributes
@@ -60,4 +61,5 @@ __all__ = [
     "Mark",
     "MarkType",
     "MarkSet",
+    "ContentMatch",
 ]

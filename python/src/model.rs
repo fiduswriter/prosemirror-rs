@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyString};
 
 use prosemirror::dynamic::types::{
-    Dyn, DynamicMark, DynamicMarkType, DynamicNode, DynamicNodeType,
+    Dyn, DynamicMark, DynamicMarkType, DynamicNode, DynamicNodeType, ParsedContentMatch,
 };
 use prosemirror::dynamic::DynamicSchema;
 use prosemirror::model::{Fragment, MarkSet, Node, NodeType, ResolvedPos, Slice};
@@ -664,6 +664,16 @@ impl PyFragment {
         format!("<Fragment {}>", self.__str__())
     }
 
+    fn append(&self, other: &PyFragment) -> PyResult<PyFragment> {
+        let inner = self
+            .schema
+            .with_types(|| self.inner.clone().append(other.inner.clone()));
+        Ok(PyFragment {
+            schema: self.schema.clone(),
+            inner,
+        })
+    }
+
     fn find_diff_start(&self, other: &PyFragment) -> PyResult<Option<usize>> {
         Ok(self
             .schema
@@ -794,7 +804,12 @@ pub struct PyNode {
 impl PyNode {
     #[staticmethod]
     fn from_json(schema: &PySchema, json: &Bound<'_, PyAny>) -> PyResult<PyNode> {
-        let val = py_to_json(json)?;
+        let val = if let Ok(s) = json.extract::<String>() {
+            serde_json::from_str(&s)
+                .map_err(|e| PyValueError::new_err(format!("Invalid JSON string: {e}")))?
+        } else {
+            py_to_json(json)?
+        };
         let node = schema
             .inner
             .node_from_json(&val)
@@ -1195,5 +1210,62 @@ impl PyNodeRange {
     #[getter]
     fn end(&self) -> usize {
         self.to_pos
+    }
+}
+
+#[pyclass(name = "ContentMatch")]
+pub struct PyContentMatch {
+    pub(crate) inner: ParsedContentMatch,
+}
+
+#[pymethods]
+impl PyContentMatch {
+    #[staticmethod]
+    fn parse(expr: &str, node_types: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let mut schema: Option<Arc<DynamicSchema>> = None;
+        for item in node_types.iter() {
+            let (_, value) = item;
+            if let Ok(py_node_type) = value.cast::<PyNodeType>() {
+                let nt = py_node_type.borrow();
+                schema = Some(nt.schema.clone());
+                break;
+            }
+        }
+        let schema = schema.ok_or_else(|| PyValueError::new_err("No valid node types provided"))?;
+        let inner = ParsedContentMatch::parse(expr, &schema)
+            .map_err(|e| PyValueError::new_err(format!("Content expression parse error: {e}")))?;
+        Ok(PyContentMatch { inner })
+    }
+
+    #[getter]
+    fn valid_end(&self) -> bool {
+        self.inner.valid_end()
+    }
+
+    fn match_type(&self, node_type: &PyNodeType) -> Option<PyContentMatch> {
+        self.inner
+            .match_type(node_type.inner)
+            .map(|cm| PyContentMatch { inner: cm })
+    }
+
+    fn match_fragment(&self, fragment: &PyFragment) -> Option<PyContentMatch> {
+        self.inner
+            .match_fragment(&fragment.inner)
+            .map(|cm| PyContentMatch { inner: cm })
+    }
+
+    #[pyo3(signature = (fragment, to_end=false, start_index=0))]
+    fn fill_before(
+        &self,
+        fragment: &PyFragment,
+        to_end: bool,
+        start_index: usize,
+    ) -> Option<PyFragment> {
+        self.inner
+            .fill_before(&fragment.inner, to_end, start_index)
+            .map(|f| PyFragment {
+                schema: fragment.schema.clone(),
+                inner: f,
+            })
     }
 }
