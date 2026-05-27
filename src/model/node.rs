@@ -56,6 +56,21 @@ pub trait NodeType<S: Schema>: Copy + Clone + Debug + PartialEq + Eq {
         false
     }
 
+    /// Whether this type is defining (for replaceRange behavior)
+    fn is_defining(self) -> bool {
+        false
+    }
+
+    /// Whether this type is defining as context (for replaceRange behavior)
+    fn is_defining_as_context(self) -> bool {
+        false
+    }
+
+    /// Whether this type is defining for content (for replaceRange behavior)
+    fn is_defining_for_content(self) -> bool {
+        false
+    }
+
     /// Whether this node type has required attributes (no defaults)
     fn has_required_attrs(self) -> bool {
         false

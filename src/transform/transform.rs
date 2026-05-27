@@ -3,11 +3,17 @@
 use super::map::{Mappable, Mapping};
 use super::mark_step::{AddMarkStep, RemoveMarkStep};
 use super::node_mark_step::{AddNodeMarkStep, RemoveNodeMarkStep};
+use super::replace::{close_fragment, covered_depths};
 use super::replace_step::{ReplaceAroundStep, ReplaceStep};
-use super::structure::NodeRange;
+use super::structure::{insert_point, NodeRange};
 use super::Step;
 use crate::model::{ContentMatch, Fragment, Mark, MarkSet, Node, NodeType, Schema, Slice};
 use derivative::Derivative;
+
+/// Check whether a node type is defining for content (used by replaceRange).
+fn defines_content<S: Schema>(node_type: S::NodeType) -> bool {
+    node_type.is_defining() || node_type.is_defining_for_content()
+}
 
 /// A Transform is a collection of steps that can be applied to a document.
 ///
@@ -233,6 +239,295 @@ impl<S: Schema> Transform<S> {
     /// ```
     pub fn delete(&mut self, from: usize, to: usize) -> &mut Self {
         self.replace(from, Some(to), None)
+    }
+
+    /// Replace a range with a slice, using depth-based heuristics to try to
+    /// make the change fit the document structure.
+    pub fn replace_range(&mut self, from: usize, to: usize, slice: Slice<S>) -> &mut Self {
+        if slice.size() == 0 {
+            return self.delete_range(from, to);
+        }
+
+        let doc = self.doc.clone();
+        let from_rp = match doc.resolve(from) {
+            Ok(rp) => rp,
+            Err(_) => return self,
+        };
+        let to_rp = match doc.resolve(to) {
+            Ok(rp) => rp,
+            Err(_) => return self,
+        };
+
+        // Trivial case: simple replace fits directly
+        if slice.open_start == 0
+            && slice.open_end == 0
+            && from_rp.start(from_rp.depth) == to_rp.start(to_rp.depth)
+        {
+            if let Ok(can) = from_rp.parent().can_replace(
+                from_rp.index(from_rp.depth),
+                to_rp.index(to_rp.depth),
+                Some(&slice.content),
+                ..,
+            ) {
+                if can {
+                    let _ = self.maybe_step(Step::Replace(ReplaceStep {
+                        span: crate::transform::Span { from, to },
+                        slice,
+                        structure: false,
+                    }));
+                    return self;
+                }
+            }
+        }
+
+        let mut target_depths: Vec<isize> = covered_depths(&from_rp, &to_rp)
+            .into_iter()
+            .map(|d| d as isize)
+            .collect();
+        // Can't replace the whole document, so remove 0 if it's present
+        if target_depths.last() == Some(&0) {
+            target_depths.pop();
+        }
+
+        let mut preferred_target = -(from_rp.depth as isize + 1);
+        target_depths.insert(0, preferred_target);
+
+        let mut pos = from_rp.pos - 1;
+        for d in (1..=from_rp.depth).rev() {
+            let node_type = from_rp.node(d).r#type();
+            if node_type.is_defining()
+                || node_type.is_defining_as_context()
+                || node_type.is_isolating()
+            {
+                break;
+            }
+            if target_depths.contains(&(d as isize)) {
+                preferred_target = d as isize;
+            } else if from_rp.before(d) == Some(pos) {
+                target_depths.insert(1, -(d as isize));
+            }
+            pos = pos.saturating_sub(1);
+        }
+
+        let preferred_target_index = target_depths
+            .iter()
+            .position(|&d| d == preferred_target)
+            .unwrap_or(0);
+
+        // Collect left edge nodes from the slice
+        let mut left_nodes: Vec<S::Node> = Vec::new();
+        let mut current_content = &slice.content;
+        for i in 0..=slice.open_start {
+            if let Some(node) = current_content.first_child() {
+                left_nodes.push(node.clone());
+                if i < slice.open_start {
+                    current_content = node.content().unwrap_or(Fragment::EMPTY_REF);
+                }
+            } else {
+                break;
+            }
+        }
+
+        let mut preferred_depth = slice.open_start;
+        for d in (0..preferred_depth).rev() {
+            let left_node = &left_nodes[d];
+            let def = defines_content::<S>(left_node.r#type());
+            let abs_preferred = preferred_target.unsigned_abs();
+            let compare_node = from_rp.node(abs_preferred.saturating_sub(1));
+            if def && !left_node.same_markup(compare_node) {
+                preferred_depth = d;
+            } else if def || !left_node.r#type().is_textblock() {
+                break;
+            }
+        }
+
+        for j in (0..=slice.open_start).rev() {
+            let open_depth = (j + preferred_depth + 1) % (slice.open_start + 1);
+            let insert = match left_nodes.get(open_depth) {
+                Some(n) => n,
+                None => continue,
+            };
+            for i in 0..target_depths.len() {
+                let idx = (i + preferred_target_index) % target_depths.len();
+                let mut target_depth = target_depths[idx];
+                let expand = target_depth >= 0;
+                if !expand {
+                    target_depth = -target_depth;
+                }
+                let target_depth = target_depth as usize;
+                let parent = from_rp.node(target_depth.saturating_sub(1));
+                let index = from_rp.index(target_depth.saturating_sub(1));
+                let marks_ok = parent
+                    .r#type()
+                    .allow_marks(insert.marks().unwrap_or(&MarkSet::new()));
+                if parent.can_replace_with(index, index, insert.r#type()) && marks_ok {
+                    let from_pos = from_rp.before(target_depth).unwrap_or(from);
+                    let to_pos = if expand {
+                        to_rp.after(target_depth).unwrap_or(to)
+                    } else {
+                        to
+                    };
+                    let closed =
+                        close_fragment(&slice.content, 0, slice.open_start, open_depth, None);
+                    self.replace(
+                        from_pos,
+                        Some(to_pos),
+                        Some(Slice::new(closed, open_depth, slice.open_end)),
+                    );
+                    return self;
+                }
+            }
+        }
+
+        // Fallback: try expanding the range
+        let start_steps = self.steps.len();
+        let mut from = from;
+        let mut to = to;
+        for i in (0..target_depths.len()).rev() {
+            self.replace(from, Some(to), Some(slice.clone()));
+            if self.steps.len() > start_steps {
+                break;
+            }
+            let depth = target_depths[i];
+            if depth < 0 {
+                continue;
+            }
+            let depth = depth as usize;
+            from = from_rp.before(depth).unwrap_or(from);
+            to = to_rp.after(depth).unwrap_or(to);
+        }
+
+        self
+    }
+
+    /// Replace a range with a single node.
+    pub fn replace_range_with(&mut self, from: usize, to: usize, node: S::Node) -> &mut Self {
+        if !node.is_inline() && from == to {
+            if let Ok(resolved_pos) = self.doc.resolve(from) {
+                if resolved_pos
+                    .parent()
+                    .content()
+                    .map(|c| c.size())
+                    .unwrap_or(0)
+                    > 0
+                {
+                    if let Some(point) = insert_point::<S>(&self.doc, from, node.r#type()) {
+                        let from = point;
+                        let to = point;
+                        return self.replace_range(
+                            from,
+                            to,
+                            Slice::new(Fragment::from(vec![node]), 0, 0),
+                        );
+                    }
+                }
+            }
+        }
+        self.replace_range(from, to, Slice::new(Fragment::from(vec![node]), 0, 0))
+    }
+
+    /// Delete a range, expanding to cover full nodes when possible.
+    pub fn delete_range(&mut self, from: usize, to: usize) -> &mut Self {
+        let doc = self.doc.clone();
+        let mut from_rp = match doc.resolve(from) {
+            Ok(rp) => rp,
+            Err(_) => return self,
+        };
+        let mut to_rp = match doc.resolve(to) {
+            Ok(rp) => rp,
+            Err(_) => return self,
+        };
+
+        // When the deleted range spans from the start of one textblock to
+        // the start of another one, move out of the start of both blocks.
+        if from_rp.parent().is_textblock()
+            && to_rp.parent().is_textblock()
+            && from_rp.start(from_rp.depth) != to_rp.start(to_rp.depth)
+            && from_rp.parent_offset == 0
+            && to_rp.parent_offset == 0
+        {
+            let shared = from_rp.shared_depth(to);
+            let mut isolated = false;
+            for d in (shared + 1..=from_rp.depth).rev() {
+                if from_rp.node(d).r#type().is_isolating() {
+                    isolated = true;
+                }
+            }
+            for d in (shared + 1..=to_rp.depth).rev() {
+                if to_rp.node(d).r#type().is_isolating() {
+                    isolated = true;
+                }
+            }
+            if !isolated {
+                let mut from = from;
+                let mut to = to;
+                for d in (1..=from_rp.depth).rev() {
+                    if from == from_rp.start(d) {
+                        if let Some(before) = from_rp.before(d) {
+                            from = before;
+                        }
+                    }
+                }
+                for d in (1..=to_rp.depth).rev() {
+                    if to == to_rp.start(d) {
+                        if let Some(before) = to_rp.before(d) {
+                            to = before;
+                        }
+                    }
+                }
+                from_rp = match self.doc.resolve(from) {
+                    Ok(rp) => rp,
+                    Err(_) => return self,
+                };
+                to_rp = match self.doc.resolve(to) {
+                    Ok(rp) => rp,
+                    Err(_) => return self,
+                };
+            }
+        }
+
+        let covered = covered_depths(&from_rp, &to_rp);
+        for (i, &depth) in covered.iter().enumerate() {
+            let last = i == covered.len() - 1;
+            if (last && depth == 0) || from_rp.node(depth).r#type().content_match().valid_end() {
+                self.delete(from_rp.start(depth), to_rp.end(depth));
+                return self;
+            }
+            if depth > 0 {
+                let can_replace = from_rp.node(depth - 1).can_replace(
+                    from_rp.index(depth - 1),
+                    to_rp.index_after(depth - 1),
+                    None,
+                    ..,
+                );
+                if last || can_replace.unwrap_or(false) {
+                    self.delete(
+                        from_rp.before(depth).unwrap_or(from),
+                        to_rp.after(depth).unwrap_or(to),
+                    );
+                    return self;
+                }
+            }
+        }
+        for d in 1..=usize::min(from_rp.depth, to_rp.depth) {
+            if from - from_rp.start(d) == from_rp.depth - d
+                && to > from_rp.end(d)
+                && to_rp.end(d) - to != to_rp.depth - d
+                && from_rp.start(d - 1) == to_rp.start(d - 1)
+            {
+                let can_replace = from_rp.node(d - 1).can_replace(
+                    from_rp.index(d - 1),
+                    to_rp.index(d - 1),
+                    None,
+                    ..,
+                );
+                if can_replace.unwrap_or(false) {
+                    self.delete(from_rp.before(d).unwrap_or(from), to);
+                    return self;
+                }
+            }
+        }
+        self.delete(from, to)
     }
 
     /// Insert content at a position.

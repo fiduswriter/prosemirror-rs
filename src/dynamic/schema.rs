@@ -74,6 +74,12 @@ pub struct NodeSpec {
     /// Whether this is a defining node
     #[serde(default)]
     pub defining: bool,
+    /// Whether this node defines context for its content
+    #[serde(default)]
+    pub defining_as_context: bool,
+    /// Whether this node is defining for its content
+    #[serde(default)]
+    pub defining_for_content: bool,
     /// Whether this is isolating
     #[serde(default)]
     pub isolating: bool,
@@ -283,6 +289,9 @@ impl DynamicSchema {
                 inline: node_spec.inline || name == "text",
                 atom: node_spec.atom,
                 isolating: node_spec.isolating,
+                defining: node_spec.defining,
+                defining_as_context: node_spec.defining_as_context,
+                defining_for_content: node_spec.defining_for_content,
                 has_required_attrs: node_spec
                     .attrs
                     .as_ref()

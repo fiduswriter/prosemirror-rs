@@ -454,6 +454,49 @@ impl PyTransform {
         Ok(slf.clone().unbind())
     }
 
+    fn replace_range(
+        slf: &Bound<'_, Self>,
+        from: usize,
+        to: usize,
+        slice: &crate::model::PySlice,
+    ) -> PyResult<Py<Self>> {
+        {
+            let mut this = slf.borrow_mut();
+            let schema = this.schema.clone();
+            schema.with_types(|| {
+                this.inner.replace_range(from, to, slice.inner.clone());
+            });
+        }
+        Ok(slf.clone().unbind())
+    }
+
+    fn replace_range_with(
+        slf: &Bound<'_, Self>,
+        from: usize,
+        to: usize,
+        node: &crate::model::PyNode,
+    ) -> PyResult<Py<Self>> {
+        {
+            let mut this = slf.borrow_mut();
+            let schema = this.schema.clone();
+            schema.with_types(|| {
+                this.inner.replace_range_with(from, to, node.inner.clone());
+            });
+        }
+        Ok(slf.clone().unbind())
+    }
+
+    fn delete_range(slf: &Bound<'_, Self>, from: usize, to: usize) -> PyResult<Py<Self>> {
+        {
+            let mut this = slf.borrow_mut();
+            let schema = this.schema.clone();
+            schema.with_types(|| {
+                this.inner.delete_range(from, to);
+            });
+        }
+        Ok(slf.clone().unbind())
+    }
+
     fn insert(slf: &Bound<'_, Self>, pos: usize, content: &Bound<'_, PyAny>) -> PyResult<Py<Self>> {
         {
             let mut this = slf.borrow_mut();

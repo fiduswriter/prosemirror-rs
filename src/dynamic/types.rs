@@ -49,6 +49,12 @@ pub struct DynamicNodeTypeData {
     pub atom: bool,
     /// Whether this is isolating
     pub isolating: bool,
+    /// Whether this is a defining node
+    pub defining: bool,
+    /// Whether this node defines context for its content
+    pub defining_as_context: bool,
+    /// Whether this node is defining for its content
+    pub defining_for_content: bool,
     /// Whether this has required attributes
     pub has_required_attrs: bool,
     /// Whether this is a textblock
@@ -929,6 +935,33 @@ impl NodeType<Dyn> for DynamicNodeType {
                 .node_types
                 .get(self.idx)
                 .is_some_and(|node_type| node_type.isolating)
+        })
+        .unwrap_or(false)
+    }
+    fn is_defining(self) -> bool {
+        with_types(|store| {
+            store
+                .node_types
+                .get(self.idx)
+                .is_some_and(|node_type| node_type.defining)
+        })
+        .unwrap_or(false)
+    }
+    fn is_defining_as_context(self) -> bool {
+        with_types(|store| {
+            store
+                .node_types
+                .get(self.idx)
+                .is_some_and(|node_type| node_type.defining_as_context)
+        })
+        .unwrap_or(false)
+    }
+    fn is_defining_for_content(self) -> bool {
+        with_types(|store| {
+            store
+                .node_types
+                .get(self.idx)
+                .is_some_and(|node_type| node_type.defining_for_content)
         })
         .unwrap_or(false)
     }
