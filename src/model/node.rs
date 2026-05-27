@@ -51,6 +51,48 @@ pub trait NodeType<S: Schema>: Copy + Clone + Debug + PartialEq + Eq {
         false
     }
 
+    /// Whether this type is isolating (prevents merging across boundaries)
+    fn is_isolating(self) -> bool {
+        false
+    }
+
+    /// Whether this node type has required attributes (no defaults)
+    fn has_required_attrs(self) -> bool {
+        false
+    }
+
+    /// Create a node of this type, filling in missing required child nodes
+    /// if necessary. Returns None if the content cannot be made valid.
+    fn create_and_fill(
+        self,
+        attrs: serde_json::Value,
+        content: Option<&Fragment<S>>,
+        marks: Option<&MarkSet<S>>,
+    ) -> Option<S::Node> {
+        let node = self.create(attrs, content, marks);
+        if let Some(c) = content {
+            if c.size() > 0 {
+                let before = self.content_match().fill_before(c, false, 0)?;
+                let new_content = before.append(c.clone());
+                let matched = self.content_match().match_fragment(&new_content)?;
+                let after_fill = matched.fill_before(&Fragment::new(), true, 0)?;
+                return Some(self.create(
+                    node.attrs_json(),
+                    Some(&new_content.append(after_fill)),
+                    marks,
+                ));
+            }
+        }
+        let matched = self
+            .content_match()
+            .match_fragment(content.unwrap_or(&Fragment::new()))?;
+        let after_fill = matched.fill_before(&Fragment::new(), true, 0)?;
+        let final_content = content
+            .map(|c| c.clone().append(after_fill.clone()))
+            .unwrap_or(after_fill);
+        Some(self.create(node.attrs_json(), Some(&final_content), marks))
+    }
+
     /// Whether this is a textblock type (a block that contains inline content)
     fn is_textblock(self) -> bool {
         false

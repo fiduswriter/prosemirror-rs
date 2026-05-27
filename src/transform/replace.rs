@@ -1,6 +1,8 @@
 //! Smart replace algorithm: `replace_step()` function and the internal `Fitter`.
 
-use crate::model::{ContentMatch, Fragment, Node, NodeType, ResolvedPos, Schema, Slice};
+use crate::model::{
+    ContentMatch, Fragment, Mark, MarkSet, Node, NodeType, ResolvedPos, Schema, Slice,
+};
 use crate::transform::replace_step::{ReplaceAroundStep, ReplaceStep};
 use crate::transform::Span;
 use crate::transform::Step;
@@ -33,12 +35,15 @@ fn fits_trivially<S: Schema>(
     rp_to: &ResolvedPos<S>,
     slice: &Slice<S>,
 ) -> bool {
-    if slice.open_start == 0 && slice.open_end == 0 && rp_from.depth == rp_to.depth {
+    if slice.open_start == 0
+        && slice.open_end == 0
+        && rp_from.start(rp_from.depth) == rp_to.start(rp_to.depth)
+    {
         rp_from
             .parent()
             .can_replace(
                 rp_from.index(rp_from.depth),
-                rp_to.index_after(rp_to.depth),
+                rp_to.index(rp_to.depth),
                 Some(&slice.content),
                 ..,
             )
@@ -53,9 +58,12 @@ struct FrontierItem<S: Schema> {
     match_: S::ContentMatch,
 }
 
-struct Fittable {
+struct Fittable<S: Schema> {
     slice_depth: usize,
     frontier_depth: usize,
+    parent: Option<S::Node>,
+    inject: Option<Fragment<S>>,
+    wrap: Option<Vec<S::NodeType>>,
 }
 
 struct CloseLevel<S: Schema> {
@@ -64,7 +72,11 @@ struct CloseLevel<S: Schema> {
     move_pos: usize,
 }
 
-#[allow(dead_code)]
+struct CloseResult {
+    pos: usize,
+    depth: usize,
+}
+
 struct Fitter<S: Schema> {
     from_pos: usize,
     to_pos: usize,
@@ -76,7 +88,6 @@ struct Fitter<S: Schema> {
     doc: *const S::Node,
 }
 
-#[allow(dead_code)]
 impl<S: Schema> Fitter<S> {
     fn new(from_rp: ResolvedPos<S>, to_rp: ResolvedPos<S>, slice: Slice<S>) -> Self {
         let from_pos = from_rp.pos;
@@ -112,6 +123,7 @@ impl<S: Schema> Fitter<S> {
         }
     }
 
+    #[allow(dead_code)]
     fn doc(&self) -> &S::Node {
         unsafe { &*self.doc }
     }
@@ -120,7 +132,6 @@ impl<S: Schema> Fitter<S> {
         self.frontier.len() - 1
     }
 
-    #[allow(unused_assignments)]
     fn fit(mut self) -> Option<Step<S>> {
         while self.unplaced.size() > 0 {
             if let Some(fit) = self.find_fittable() {
@@ -132,25 +143,18 @@ impl<S: Schema> Fitter<S> {
 
         let move_inline = self.must_move_inline();
         let placed_size = self.placed.size() - self.depth() - self.from_depth;
-        let to_depth = self.to_depth;
-        let to_pos = self.to_pos;
-        let from_depth = self.from_depth;
         let from_pos = self.from_pos;
-
-        // Resolve positions using the raw pointer to avoid borrow conflicts
         let doc = unsafe { &*self.doc };
-        let to_rp = doc.resolve(to_pos).ok()?;
-        let to_end = to_rp.end(to_depth);
-        let to_close = if move_inline > 0 {
-            doc.resolve(move_inline).ok()
-        } else {
-            None
+        let to_rp = doc.resolve(self.to_pos).ok()?;
+        let to_close = match move_inline {
+            None => None,
+            Some(pos) => doc.resolve(pos).ok(),
         };
         let close_ref = to_close.as_ref().unwrap_or(&to_rp);
         let close_result = self.close(close_ref)?;
 
         let mut content = std::mem::replace(&mut self.placed, Fragment::new());
-        let mut open_start = from_depth;
+        let mut open_start = self.from_depth;
         let mut open_end = close_result.depth;
         while open_start > 0 && open_end > 0 && content.child_count() == 1 {
             if let Some(first) = content.first_child() {
@@ -167,20 +171,20 @@ impl<S: Schema> Fitter<S> {
         }
 
         let slice = Slice::new(content, open_start, open_end);
-        if move_inline > 0 {
+        if let Some(move_inline) = move_inline {
             return Some(Step::ReplaceAround(ReplaceAroundStep {
                 span: Span {
                     from: from_pos,
                     to: move_inline,
                 },
-                gap_from: to_pos,
-                gap_to: to_end,
+                gap_from: self.to_pos,
+                gap_to: to_rp.end(self.to_depth),
                 slice,
                 insert: placed_size,
                 structure: false,
             }));
         }
-        if slice.size() > 0 || from_pos != to_pos {
+        if slice.size() > 0 || from_pos != self.to_pos {
             return Some(Step::Replace(ReplaceStep {
                 span: Span {
                     from: from_pos,
@@ -193,7 +197,7 @@ impl<S: Schema> Fitter<S> {
         None
     }
 
-    fn find_fittable(&self) -> Option<Fittable> {
+    fn find_fittable(&self) -> Option<Fittable<S>> {
         let mut start_depth = self.unplaced.open_start;
         let mut open_end = self.unplaced.open_end;
         let mut cur = &self.unplaced.content;
@@ -203,7 +207,7 @@ impl<S: Schema> Fitter<S> {
                 if cur.child_count() > 1 {
                     open_end = 0;
                 }
-                if first_child.r#type().is_atom() && open_end <= d {
+                if first_child.r#type().is_isolating() && open_end <= d {
                     start_depth = d;
                     break;
                 }
@@ -217,69 +221,69 @@ impl<S: Schema> Fitter<S> {
             }
         }
 
-        for pass in 0..2 {
-            let slice_start = if pass == 0 {
+        for pass in 1..=2 {
+            let slice_start = if pass == 1 {
                 start_depth
             } else {
                 self.unplaced.open_start
             };
             for slice_depth in (0..=slice_start).rev() {
-                let (parent_frag, parent_nt) = if slice_depth > 0 {
-                    let parent = content_at(&self.unplaced.content, slice_depth - 1);
-                    match parent.first_child() {
-                        Some(first) => (
-                            first.content().cloned().unwrap_or_default(),
-                            Some(first.r#type()),
-                        ),
-                        None => continue,
-                    }
+                let (fragment, parent) = if slice_depth > 0 {
+                    let parent_frag = content_at(&self.unplaced.content, slice_depth - 1);
+                    let parent_node = parent_frag.first_child()?;
+                    (
+                        parent_node.content().cloned().unwrap_or_default(),
+                        Some(parent_node.clone()),
+                    )
                 } else {
                     (self.unplaced.content.clone(), None)
                 };
-                let first = parent_frag.first_child();
+                let first = fragment.first_child();
 
                 for frontier_depth in (0..=self.depth()).rev() {
                     let type_ = self.frontier[frontier_depth].node_type;
                     let match_ = self.frontier[frontier_depth].match_;
 
-                    if pass == 0 {
+                    if pass == 1 {
+                        let mut inject: Option<Fragment<S>> = None;
                         let fits = if let Some(f) = first {
-                            match_.match_type(f.r#type()).is_some()
+                            match_.match_type(f.r#type()).is_some() || {
+                                inject =
+                                    match_.fill_before(&Fragment::from(vec![f.clone()]), false, 0);
+                                inject.is_some()
+                            }
                         } else {
-                            parent_nt.is_some_and(|p| type_.compatible_content(p))
+                            parent
+                                .as_ref()
+                                .is_some_and(|p| type_.compatible_content(p.r#type()))
                         };
                         if fits {
                             return Some(Fittable {
                                 slice_depth,
                                 frontier_depth,
+                                parent,
+                                inject,
+                                wrap: None,
                             });
                         }
+                    } else if pass == 2 {
                         if let Some(f) = first {
-                            let inject =
-                                match_.fill_before(&Fragment::from(vec![f.clone()]), false, 0);
-                            if inject.is_some() {
-                                return Some(Fittable {
-                                    slice_depth,
-                                    frontier_depth,
-                                });
-                            }
-                        }
-                    } else if pass == 1 {
-                        if let Some(f) = first {
-                            let wrap = match_.find_wrapping(f.r#type());
-                            if let Some(ref w) = wrap {
-                                if !w.is_empty() {
+                            if let Some(wrap) = match_.find_wrapping(f.r#type()) {
+                                if !wrap.is_empty() {
                                     return Some(Fittable {
                                         slice_depth,
                                         frontier_depth,
+                                        parent,
+                                        inject: None,
+                                        wrap: Some(wrap),
                                     });
                                 }
                             }
                         }
                     }
 
-                    if let Some(pnt) = parent_nt {
-                        if match_.match_type(pnt).is_some() {
+                    if let Some(ref p) = parent {
+                        if match_.match_type(p.r#type()).is_some() {
                             break;
                         }
                     }
@@ -331,21 +335,41 @@ impl<S: Schema> Fitter<S> {
         }
     }
 
-    fn place_nodes(&mut self, fittable: Fittable) {
+    fn place_nodes(&mut self, fittable: Fittable<S>) {
         let slice_depth = fittable.slice_depth;
         let frontier_depth = fittable.frontier_depth;
 
         while self.depth() > frontier_depth {
             self.close_frontier_node();
         }
+        if let Some(wrap) = fittable.wrap {
+            for w in wrap {
+                self.open_frontier_node(w, None, None);
+            }
+        }
 
         let slice = self.unplaced.clone();
-        let fragment = slice.content.clone();
+        let fragment = fittable
+            .parent
+            .as_ref()
+            .and_then(|p| p.content().cloned())
+            .unwrap_or_else(|| slice.content.clone());
         let open_start = slice.open_start.saturating_sub(slice_depth);
         let mut taken = 0;
         let mut add = Vec::new();
+        let type_ = self.frontier[frontier_depth].node_type;
         let mut match_ = self.frontier[frontier_depth].match_;
-        let _type_ = self.frontier[frontier_depth].node_type;
+
+        if let Some(inject) = fittable.inject {
+            for i in 0..inject.child_count() {
+                if let Some(child) = inject.maybe_child(i) {
+                    add.push(child.clone());
+                }
+            }
+            if let Some(matched) = match_.match_fragment(&inject) {
+                match_ = matched;
+            }
+        }
 
         let open_end_count = (fragment.size() + slice_depth) as isize
             - (slice.content.size() - slice.open_end) as isize;
@@ -362,7 +386,12 @@ impl<S: Schema> Fitter<S> {
                         } else {
                             -1
                         };
-                        let closed = close_node_start::<S>(next, oc, oe);
+                        let filtered_marks = next
+                            .marks()
+                            .map(|m| filter_marks(type_, m))
+                            .unwrap_or_else(MarkSet::new);
+                        let marked = next.mark(filtered_marks);
+                        let closed = close_node_start::<S>(&marked, oc, oe);
                         add.push(closed);
                     }
                 } else {
@@ -374,12 +403,20 @@ impl<S: Schema> Fitter<S> {
         }
 
         let to_end = taken == fragment.child_count();
-        let actual_open_end = if to_end { open_end_count } else { -1 };
+        let mut actual_open_end = open_end_count;
+        if !to_end {
+            actual_open_end = -1;
+        }
 
         self.placed = add_to_fragment(&self.placed, frontier_depth, &Fragment::from(add));
         self.frontier[frontier_depth].match_ = match_;
 
-        if to_end && actual_open_end < 0 && self.frontier.len() > 1 {
+        if to_end
+            && actual_open_end < 0
+            && fittable.parent.is_some()
+            && fittable.parent.as_ref().unwrap().r#type() == self.frontier[self.depth()].node_type
+            && self.frontier.len() > 1
+        {
             self.close_frontier_node();
         }
 
@@ -420,34 +457,26 @@ impl<S: Schema> Fitter<S> {
         }
     }
 
-    fn must_move_inline(&self) -> usize {
+    fn must_move_inline(&self) -> Option<usize> {
         let doc = unsafe { &*self.doc };
-        let to_rp = match doc.resolve(self.to_pos) {
-            Ok(rp) => rp,
-            Err(_) => return 0,
-        };
+        let to_rp = doc.resolve(self.to_pos).ok()?;
         if !to_rp.parent().r#type().is_textblock() {
-            return 0;
+            return None;
         }
         let top = &self.frontier[self.depth()];
         if !top.node_type.is_textblock() {
-            return 0;
+            return None;
         }
-        let after_fits =
-            content_after_fits(&to_rp, self.to_depth, top.node_type, top.match_, false);
-        if after_fits.is_none() {
-            return 0;
-        }
-        let close_level = self.find_close_level(&to_rp);
+        content_after_fits(&to_rp, self.to_depth, top.node_type, top.match_, false)?;
         if self.to_depth == self.depth() {
-            if let Some(ref level) = close_level {
+            if let Some(ref level) = self.find_close_level(&to_rp) {
                 if level.depth == self.depth() {
-                    return 0;
+                    return None;
                 }
             }
         }
         let mut depth = self.to_depth;
-        let mut after = to_rp.after(depth).unwrap_or(0);
+        let mut after = to_rp.after(depth)?;
         while depth > 1 {
             depth -= 1;
             if after != to_rp.end(depth) {
@@ -455,12 +484,12 @@ impl<S: Schema> Fitter<S> {
             }
             after += 1;
         }
-        after
+        Some(after)
     }
 
     fn find_close_level(&self, to: &ResolvedPos<S>) -> Option<CloseLevel<S>> {
         let max_depth = usize::min(self.depth(), to.depth);
-        for i in (0..=max_depth).rev() {
+        'scan: for i in (0..=max_depth).rev() {
             let match_ = self.frontier[i].match_;
             let type_ = self.frontier[i].node_type;
             let drop_inner = i < to.depth && to.end(i + 1) == to.pos + (to.depth - (i + 1));
@@ -468,35 +497,26 @@ impl<S: Schema> Fitter<S> {
             if fit.is_none() {
                 continue;
             }
-            let mut valid = true;
             for d in (0..i).rev() {
                 let match2 = self.frontier[d].match_;
                 let type2 = self.frontier[d].node_type;
                 let matches = content_after_fits(to, d, type2, match2, true);
                 match matches {
-                    None => {
-                        valid = false;
-                        break;
-                    }
-                    Some(ref f) if f.child_count() > 0 => {
-                        valid = false;
-                        break;
-                    }
+                    None => continue 'scan,
+                    Some(ref f) if f.child_count() > 0 => continue 'scan,
                     _ => {}
                 }
             }
-            if valid {
-                let move_pos = if drop_inner {
-                    to.after(i + 1).unwrap_or(to.pos)
-                } else {
-                    to.pos
-                };
-                return Some(CloseLevel {
-                    depth: i,
-                    fit_fragment: fit.unwrap(),
-                    move_pos,
-                });
-            }
+            let move_pos = if drop_inner {
+                to.after(i + 1).unwrap_or(to.pos)
+            } else {
+                to.pos
+            };
+            return Some(CloseLevel {
+                depth: i,
+                fit_fragment: fit.unwrap(),
+                move_pos,
+            });
         }
         None
     }
@@ -530,17 +550,20 @@ impl<S: Schema> Fitter<S> {
         for d in (close.depth + 1)..=move_to.depth {
             let node = move_to.node(d);
             let index = move_to.index(d);
-            let fill = node
+            let add = node
                 .r#type()
                 .content_match()
                 .fill_before(node.content().unwrap_or(Fragment::EMPTY_REF), true, index)
                 .unwrap_or_default();
-            let fill_opt = if fill.child_count() > 0 {
-                Some(fill)
-            } else {
-                None
-            };
-            self.open_frontier_node(node.r#type(), fill_opt);
+            self.open_frontier_node(
+                node.r#type(),
+                Some(node.attrs_json()),
+                if add.child_count() > 0 {
+                    Some(add)
+                } else {
+                    None
+                },
+            );
         }
 
         Some(CloseResult {
@@ -549,12 +572,21 @@ impl<S: Schema> Fitter<S> {
         })
     }
 
-    fn open_frontier_node(&mut self, type_: S::NodeType, content: Option<Fragment<S>>) {
+    fn open_frontier_node(
+        &mut self,
+        type_: S::NodeType,
+        attrs: Option<serde_json::Value>,
+        content: Option<Fragment<S>>,
+    ) {
         let d = self.depth();
         if let Some(new_match) = self.frontier[d].match_.match_type(type_) {
             self.frontier[d].match_ = new_match;
         }
-        let node = type_.create_node(content.as_ref(), None);
+        let node = type_.create(
+            attrs.unwrap_or(serde_json::Value::Null),
+            content.as_ref(),
+            None,
+        );
         self.placed = add_to_fragment(&self.placed, d, &Fragment::from(vec![node]));
         self.frontier.push(FrontierItem {
             node_type: type_,
@@ -573,9 +605,14 @@ impl<S: Schema> Fitter<S> {
     }
 }
 
-struct CloseResult {
-    pos: usize,
-    depth: usize,
+fn filter_marks<S: Schema>(type_: S::NodeType, marks: &MarkSet<S>) -> MarkSet<S> {
+    let mut result = MarkSet::new();
+    for mark in marks {
+        if type_.allows_mark_type(mark.r#type()) {
+            result.add(mark);
+        }
+    }
+    result
 }
 
 fn drop_from_fragment<S: Schema>(
@@ -741,7 +778,11 @@ pub fn covered_depths<S: Schema>(from: &ResolvedPos<S>, to: &ResolvedPos<S>) -> 
     let min_depth = usize::min(from.depth, to.depth);
     for d in (0..=min_depth).rev() {
         let start = from.start(d);
-        if start < from.pos - (from.depth - d) || to.end(d) > to.pos + (to.depth - d) {
+        if start < from.pos - (from.depth - d)
+            || to.end(d) > to.pos + (to.depth - d)
+            || from.node(d).r#type().is_isolating()
+            || to.node(d).r#type().is_isolating()
+        {
             break;
         }
         if start == to.start(d)

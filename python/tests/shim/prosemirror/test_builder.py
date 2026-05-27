@@ -25,12 +25,12 @@ _test_schema = Schema(
                 "group": "inline",
             },
             "hard_break": {"inline": True, "group": "inline"},
-            "bullet_list": {"content": "list_item+", "group": "block"},
             "ordered_list": {
                 "content": "list_item+",
                 "group": "block",
                 "attrs": {"order": {"default": 1}},
             },
+            "bullet_list": {"content": "list_item+", "group": "block"},
             "list_item": {"content": "paragraph block*", "defining": True},
         },
         "marks": {
@@ -158,13 +158,14 @@ def builders(schema, names):
     if names:
         for name, value in names.items():
             type_name = value.get("nodeType") or value.get("markType") or name
+            attrs = {k: v for k, v in value.items() if k not in ("nodeType", "markType")}
             type_ = schema.nodes.get(type_name)
             if type_:
-                result[name] = block(type_, value)
+                result[name] = block(type_, attrs)
             else:
                 type_ = schema.marks.get(type_name)
                 if type_:
-                    result[name] = mark(type_, value)
+                    result[name] = mark(type_, attrs)
     return result
 
 

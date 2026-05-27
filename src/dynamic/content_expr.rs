@@ -4,6 +4,7 @@
 //! `"paragraph block*"` into a deterministic finite automaton that can
 //! match sequences of node types.
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -22,7 +23,7 @@ pub struct ContentExpr {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentState {
     /// Transitions: maps a node type name to the next state index
-    pub edges: HashMap<String, usize>,
+    pub edges: IndexMap<String, usize>,
     /// Whether this state represents a valid end of the content
     pub valid_end: bool,
 }
@@ -186,7 +187,7 @@ pub fn parse_content_expr(
         // Empty content: single accepting state with no edges
         return Ok(ContentExpr {
             states: vec![ContentState {
-                edges: HashMap::new(),
+                edges: IndexMap::new(),
                 valid_end: true,
             }],
         });
@@ -509,7 +510,7 @@ fn nfa_to_dfa(nfa: &[NfaState]) -> ContentExpr {
 
     let start_valid = start.iter().any(|&s| nfa[s].valid_end);
     dfa_states.push(ContentState {
-        edges: HashMap::new(),
+        edges: IndexMap::new(),
         valid_end: start_valid,
     });
 
@@ -522,7 +523,7 @@ fn nfa_to_dfa(nfa: &[NfaState]) -> ContentExpr {
         queue_idx += 1;
 
         // Collect all possible transitions from this set
-        let mut transitions: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut transitions: IndexMap<String, Vec<usize>> = IndexMap::new();
         for &state in &current_set {
             for (name, target) in &nfa[state].edges {
                 transitions
@@ -542,7 +543,7 @@ fn nfa_to_dfa(nfa: &[NfaState]) -> ContentExpr {
                 let idx = dfa_states.len();
                 let valid = targets.iter().any(|&s| nfa[s].valid_end);
                 dfa_states.push(ContentState {
-                    edges: HashMap::new(),
+                    edges: IndexMap::new(),
                     valid_end: valid,
                 });
                 state_map.insert(targets.clone(), idx);
@@ -562,7 +563,7 @@ impl ContentExpr {
     pub fn empty() -> Self {
         ContentExpr {
             states: vec![ContentState {
-                edges: HashMap::new(),
+                edges: IndexMap::new(),
                 valid_end: true,
             }],
         }

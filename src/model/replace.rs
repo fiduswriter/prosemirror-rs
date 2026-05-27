@@ -71,15 +71,7 @@ impl<S: Schema> Slice<S> {
 
     /// Remove a subrange from within the slice.
     pub fn remove_between(&self, from: usize, to: usize) -> Slice<S> {
-        if from == 0 {
-            let content = self.content.cut(to..);
-            return Slice::new(content, self.open_start, self.open_end);
-        }
-        if to == self.content.size() {
-            let content = self.content.cut(..from);
-            return Slice::new(content, self.open_start, self.open_end);
-        }
-        let content = self.content.cut(..from).append(self.content.cut(to..));
+        let content = remove_range(&self.content, from + self.open_start, to + self.open_start);
         Slice::new(content, self.open_start, self.open_end)
     }
 
@@ -91,6 +83,37 @@ impl<S: Schema> Slice<S> {
         let content = insert_into(&self.content, pos + self.open_start, fragment, None)?;
         Ok(content.map(|c| Slice::<S>::new(c, self.open_start, self.open_end)))
     }
+}
+
+fn remove_range<S: Schema>(content: &Fragment<S>, from: usize, to: usize) -> Fragment<S> {
+    if from == 0 && to == content.size() {
+        return Fragment::new();
+    }
+    if from == 0 {
+        return content.cut(to..);
+    }
+    if to == content.size() {
+        return content.cut(..from);
+    }
+    let from_idx = content.find_index(from, false).unwrap();
+    let to_idx = content.find_index(to, false).unwrap();
+    let child = content.child(from_idx.index);
+    if from_idx.offset == from || child.is_text() {
+        // Range starts at a child boundary or inside a text node — flat cut is safe
+        return content.cut(..from).append(content.cut(to..));
+    }
+    if from_idx.index != to_idx.index {
+        panic!("Removing non-flat range");
+    }
+    let inner = remove_range(
+        child.content().unwrap_or(&Fragment::new()),
+        from - from_idx.offset - 1,
+        to - to_idx.offset - 1,
+    );
+    let new_child = child.copy(|_| inner);
+    content
+        .replace_child(from_idx.index, new_child)
+        .into_owned()
 }
 
 /// Error on insertion

@@ -5,7 +5,7 @@ use crate::model::MarkType;
 use crate::model::{ContentMatch, Fragment, Mark, MarkSet, Node, NodeType, Schema, Text, TextNode};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::RangeBounds;
@@ -47,6 +47,10 @@ pub struct DynamicNodeTypeData {
     pub inline: bool,
     /// Whether this is an atom (leaf) type
     pub atom: bool,
+    /// Whether this is isolating
+    pub isolating: bool,
+    /// Whether this has required attributes
+    pub has_required_attrs: bool,
     /// Whether this is a textblock
     pub textblock: bool,
     /// Whether this has inline content
@@ -209,15 +213,20 @@ impl ContentMatch<Dyn> for DynamicContentMatch {
     ) -> Option<Fragment<Dyn>> {
         with_types(|store| {
             let expr = &store.content_exprs[self.expr_idx];
-            let mut state = self.state;
-            for i in 0..start_index {
-                if let Some(child) = after.maybe_child(i) {
-                    let name = &store.node_types[child.r#type().idx].name;
-                    state = expr.match_type(state, name)?;
-                }
-            }
-            let mut result = Vec::new();
-            fill_before_impl(expr, state, after, start_index, to_end, &mut result, store)?;
+            let mut seen = HashSet::new();
+            seen.insert(self.state);
+            let mut types = Vec::new();
+            let result = fill_before_search(
+                expr,
+                self.state,
+                after,
+                start_index,
+                to_end,
+                &mut seen,
+                &mut types,
+                store,
+                0,
+            )?;
             Some(Fragment::from(result))
         })
         .flatten()
@@ -225,14 +234,100 @@ impl ContentMatch<Dyn> for DynamicContentMatch {
 
     fn find_wrapping(self, target: DynamicNodeType) -> Option<Vec<DynamicNodeType>> {
         with_types(|store| {
+            let target_name = &store.node_types[target.idx].name;
             let expr = &store.content_exprs[self.expr_idx];
-            let name = &store.node_types[target.idx].name;
-            if expr.match_type(self.state, name).is_some() {
+            if expr.match_type(self.state, target_name).is_some() {
                 return Some(Vec::new());
+            }
+            // BFS through wrapper types, matching JS computeWrapping
+            let mut seen = HashSet::new();
+            struct WrapEntry {
+                expr_idx: usize,
+                state: usize,
+                wrapper_type: Option<usize>,
+                via: Option<usize>,
+            }
+            let mut active: Vec<WrapEntry> = Vec::new();
+            active.push(WrapEntry {
+                expr_idx: self.expr_idx,
+                state: self.state,
+                wrapper_type: None,
+                via: None,
+            });
+            let mut queue_idx = 0;
+            while queue_idx < active.len() {
+                let current_expr_idx = active[queue_idx].expr_idx;
+                let current_state = active[queue_idx].state;
+                let current_wrapper = active[queue_idx].wrapper_type;
+                let current_via = active[queue_idx].via;
+                queue_idx += 1;
+                let current_expr = &store.content_exprs[current_expr_idx];
+                if current_expr
+                    .match_type(current_state, target_name)
+                    .is_some()
+                {
+                    // Reconstruct the path, including current entry's wrapper type
+                    let mut result = Vec::new();
+                    if let Some(idx) = current_wrapper {
+                        result.push(DynamicNodeType { idx });
+                    }
+                    let mut next_via = current_via;
+                    while let Some(v) = next_via {
+                        let entry = &active[v];
+                        if let Some(idx) = entry.wrapper_type {
+                            result.push(DynamicNodeType { idx });
+                        }
+                        next_via = entry.via;
+                    }
+                    result.reverse();
+                    return Some(result);
+                }
+                for i in 0..current_expr.edge_count(current_state) {
+                    let (name, next_state) = current_expr.edge(current_state, i)?;
+                    let node_type_idx = store.node_types.iter().position(|nt| nt.name == name)?;
+                    let nt = &store.node_types[node_type_idx];
+                    // Skip leaf nodes and nodes with required attrs
+                    if nt.atom || nt.has_required_attrs {
+                        continue;
+                    }
+                    if !seen.insert(name.to_string()) {
+                        continue;
+                    }
+                    // If we're not at the start, next_state must be a valid end
+                    if current_wrapper.is_some() && !current_expr.valid_end(next_state) {
+                        continue;
+                    }
+                    let wrapper_expr_idx = nt.content_expr_idx;
+                    active.push(WrapEntry {
+                        expr_idx: wrapper_expr_idx,
+                        state: 0,
+                        wrapper_type: Some(node_type_idx),
+                        via: Some(queue_idx - 1),
+                    });
+                }
             }
             None
         })
         .flatten()
+    }
+
+    fn compatible(self, other: Self) -> bool {
+        with_types(|store| {
+            let expr_a = &store.content_exprs[self.expr_idx];
+            let expr_b = &store.content_exprs[other.expr_idx];
+            for i in 0..expr_a.edge_count(self.state) {
+                let (name_a, _) = expr_a.edge(self.state, i)?;
+                for j in 0..expr_b.edge_count(other.state) {
+                    let (name_b, _) = expr_b.edge(other.state, j)?;
+                    if name_a == name_b {
+                        return Some(true);
+                    }
+                }
+            }
+            Some(false)
+        })
+        .flatten()
+        .unwrap_or(false)
     }
 
     fn inline_content(self) -> bool {
@@ -275,27 +370,87 @@ impl ContentMatch<Dyn> for DynamicContentMatch {
     }
 }
 
-fn fill_before_impl(
+#[allow(clippy::too_many_arguments)]
+fn fill_before_search(
     expr: &ContentExpr,
     state: usize,
     after: &Fragment<Dyn>,
-    index: usize,
+    start_index: usize,
     to_end: bool,
-    result: &mut Vec<DynamicNode>,
+    seen: &mut HashSet<usize>,
+    types: &mut Vec<usize>,
     store: &DynTypeStore,
-) -> Option<()> {
-    if to_end && expr.valid_end(state) {
-        return Some(());
+    depth: usize,
+) -> Option<Vec<DynamicNode>> {
+    if depth > 50 {
+        panic!(
+            "fill_before_search recursion too deep: depth={}, state={}, types={:?}",
+            depth,
+            state,
+            types
+                .iter()
+                .map(|&i| &store.node_types[i].name)
+                .collect::<Vec<_>>()
+        );
     }
-    if let Some(child) = after.maybe_child(index) {
-        let name = &store.node_types[child.r#type().idx].name;
-        let next = expr.match_type(state, name)?;
-        result.push(child.clone());
-        return fill_before_impl(expr, next, after, index + 1, to_end, result, store);
+    // Try to match the after content from this state
+    let mut match_state = state;
+    let mut can_match = true;
+    for i in start_index..after.child_count() {
+        if let Some(child) = after.maybe_child(i) {
+            let name = &store.node_types[child.r#type().idx].name;
+            match expr.match_type(match_state, name) {
+                Some(next) => match_state = next,
+                None => {
+                    can_match = false;
+                    break;
+                }
+            }
+        }
     }
-    if !to_end && expr.valid_end(state) {
-        return Some(());
+    if can_match && (!to_end || expr.valid_end(match_state)) {
+        // Create filler nodes for the accumulated types
+        let mut result = Vec::new();
+        for &type_idx in types.iter() {
+            let attrs = serde_json::to_value(&store.node_types[type_idx].attrs).unwrap_or_default();
+            let node_type = DynamicNodeType { idx: type_idx };
+            let filler = node_type.create_and_fill(attrs, None, None)?;
+            result.push(filler);
+        }
+        return Some(result);
     }
+
+    // Explore edges
+    for i in 0..expr.edge_count(state) {
+        let (name, next_state) = expr.edge(state, i)?;
+        let node_type_idx = store.node_types.iter().position(|nt| nt.name == name)?;
+
+        // Skip text nodes and nodes with required attrs
+        if name == "text" || store.node_types[node_type_idx].has_required_attrs {
+            continue;
+        }
+
+        if !seen.insert(next_state) {
+            continue;
+        }
+
+        types.push(node_type_idx);
+        if let Some(result) = fill_before_search(
+            expr,
+            next_state,
+            after,
+            start_index,
+            to_end,
+            seen,
+            types,
+            store,
+            depth + 1,
+        ) {
+            return Some(result);
+        }
+        types.pop();
+    }
+
     None
 }
 
@@ -686,7 +841,7 @@ impl Hash for DynamicMark {
 
 impl NodeType<Dyn> for DynamicNodeType {
     fn compatible_content(self, other: Self) -> bool {
-        self.idx == other.idx
+        self.idx == other.idx || self.content_match().compatible(other.content_match())
     }
 
     fn valid_content(self, fragment: &Fragment<Dyn>) -> bool {
@@ -765,6 +920,24 @@ impl NodeType<Dyn> for DynamicNodeType {
                         .get(node_type.content_expr_idx)
                         .is_some_and(|expr| expr.valid_end(0) && expr.edge_count(0) == 0)
             })
+        })
+        .unwrap_or(false)
+    }
+    fn is_isolating(self) -> bool {
+        with_types(|store| {
+            store
+                .node_types
+                .get(self.idx)
+                .is_some_and(|node_type| node_type.isolating)
+        })
+        .unwrap_or(false)
+    }
+    fn has_required_attrs(self) -> bool {
+        with_types(|store| {
+            store
+                .node_types
+                .get(self.idx)
+                .is_some_and(|node_type| node_type.has_required_attrs)
         })
         .unwrap_or(false)
     }

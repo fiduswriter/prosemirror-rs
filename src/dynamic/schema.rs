@@ -6,6 +6,7 @@ use crate::dynamic::types::{
     DynamicNodeTypeData, DYN_TYPES,
 };
 use crate::model::{Fragment, MarkSet, Node, NodeType};
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -36,7 +37,7 @@ impl std::error::Error for DynamicSchemaError {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SchemaSpec {
     /// Node type specifications, keyed by name
-    pub nodes: HashMap<String, NodeSpec>,
+    pub nodes: IndexMap<String, NodeSpec>,
     /// Mark type specifications, keyed by name
     #[serde(default)]
     pub marks: HashMap<String, MarkSpec>,
@@ -281,6 +282,11 @@ impl DynamicSchema {
                 // Text nodes are always inline in ProseMirror, even without explicit `inline: true`
                 inline: node_spec.inline || name == "text",
                 atom: node_spec.atom,
+                isolating: node_spec.isolating,
+                has_required_attrs: node_spec
+                    .attrs
+                    .as_ref()
+                    .is_some_and(|a| a.values().any(|v| v.default.is_none())),
                 textblock: is_textblock,
                 has_inline_content,
                 content_expr_idx,

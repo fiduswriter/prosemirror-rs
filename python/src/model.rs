@@ -262,7 +262,7 @@ impl PySchema {
     fn mark(&self, type_name: &str, attrs: Option<&Bound<'_, PyAny>>) -> PyResult<PyMark> {
         let attrs = attrs
             .map(py_to_json)
-            .unwrap_or(Ok(serde_json::Value::Null))?;
+            .unwrap_or(Ok(serde_json::Value::Object(serde_json::Map::new())))?;
         Ok(PyMark {
             schema: self.inner.clone(),
             inner: DynamicMark {
