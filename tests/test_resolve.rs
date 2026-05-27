@@ -23,18 +23,20 @@ fn basic_spec_json() -> serde_json::Value {
 
 fn test_doc(schema: &DynamicSchema) -> prosemirror::dynamic::DynamicNode {
     schema.with_types(|| {
-        schema.node_from_json(&serde_json::json!({
-            "type": "doc",
-            "content": [
-                { "type": "paragraph", "content": [{ "type": "text", "text": "ab" }] },
-                { "type": "blockquote", "content": [{
-                    "type": "paragraph", "content": [
-                        { "type": "text", "text": "cd", "marks": [{"type": "em"}] },
-                        { "type": "text", "text": "ef" }
-                    ]
-                }]}
-            ]
-        })).unwrap()
+        schema
+            .node_from_json(&serde_json::json!({
+                "type": "doc",
+                "content": [
+                    { "type": "paragraph", "content": [{ "type": "text", "text": "ab" }] },
+                    { "type": "blockquote", "content": [{
+                        "type": "paragraph", "content": [
+                            { "type": "text", "text": "cd", "marks": [{"type": "em"}] },
+                            { "type": "text", "text": "ef" }
+                        ]
+                    }]}
+                ]
+            }))
+            .unwrap()
     })
 }
 
@@ -94,7 +96,11 @@ fn resolve_before_after_consistency() {
             for depth in 1..=rp.depth {
                 let b = rp.before(depth).unwrap();
                 let s = rp.start(depth);
-                assert_eq!(b + 1, s, "before({depth}) + 1 == start({depth}) at pos={pos}");
+                assert_eq!(
+                    b + 1,
+                    s,
+                    "before({depth}) + 1 == start({depth}) at pos={pos}"
+                );
             }
         }
     });
@@ -149,16 +155,18 @@ fn resolve_same_parent() {
 fn resolve_marks_at_position() {
     let schema = DynamicSchema::from_json(&basic_spec_json()).unwrap();
     let d = schema.with_types(|| {
-        schema.node_from_json(&serde_json::json!({
-            "type": "doc",
-            "content": [{
-                "type": "paragraph",
-                "content": [
-                    { "type": "text", "text": "hello " },
-                    { "type": "text", "text": "world", "marks": [{"type": "em"}] }
-                ]
-            }]
-        })).unwrap()
+        schema
+            .node_from_json(&serde_json::json!({
+                "type": "doc",
+                "content": [{
+                    "type": "paragraph",
+                    "content": [
+                        { "type": "text", "text": "hello " },
+                        { "type": "text", "text": "world", "marks": [{"type": "em"}] }
+                    ]
+                }]
+            }))
+            .unwrap()
     });
 
     schema.with_types(|| {

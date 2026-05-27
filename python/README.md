@@ -96,17 +96,27 @@ version counter in collaborative-editing protocols.
 The underlying Rust library was originally written by
 **Daniel Seiler** ([Xiphoseer](https://github.com/Xiphoseer), <me@dseiler.eu>),
 who designed and implemented the document model, transform pipeline, and
-runtime schema system. Currently maintained by
+runtime schema system. **Mustafa J** (<mustafa.0x@gmail.com>) has made
+substantial contributions to the core Rust implementation.
+Currently maintained by
 **Johannes Wilm** ([FidusWriter](https://fiduswriter.org),
 <johannes@fiduswriter.org>).
 
 ProseMirror is by **Marijn Haverbeke** and contributors —
 see [prosemirror.net](https://prosemirror.net).
 
+The Python test suite used for cross-implementation validation is taken from
+[`prosemirror-py`](https://github.com/fellowapp/prosemirror-py), a Python port
+of ProseMirror originally created by **Shen Li** and maintained by
+**Samuel Cormier-Iijima**, **Patrick Gingras**, and others at
+[Fellow Insights Inc.](https://github.com/fellowapp)
+
 ## License
 
 MIT — see [LICENSE](../LICENSE).
 
 Copyright 2026 Johannes Wilm
+Copyright 2025–2026 Mustafa J
 Copyright 2020 Daniel Seiler
+Copyright 2019 Fellow Insights Inc. (prosemirror-py Python port)
 Copyright 2015–2026 Marijn Haverbeke and others

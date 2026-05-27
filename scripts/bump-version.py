@@ -15,21 +15,31 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 FILES = [
-    ("Rust crate",           REPO / "Cargo.toml",
-     r'^version\s*=\s*"(.+?)"',
-     r'version = "{}"'),
-    ("Python bindings crate", REPO / "python" / "Cargo.toml",
-     r'^version\s*=\s*"(.+?)"',
-     r'version = "{}"'),
-    ("Python package",       REPO / "python" / "pyproject.toml",
-     r'^version\s*=\s*"(.+?)"',
-     r'version = "{}"'),
-    ("Node bindings crate",  REPO / "node" / "Cargo.toml",
-     r'^version\s*=\s*"(.+?)"',
-     r'version = "{}"'),
-    ("npm package",          REPO / "node" / "package.json",
-     r'^\s*"version":\s*"(.+?)",?',
-     r'  "version": "{}",'),
+    ("Rust crate", REPO / "Cargo.toml", r'^version\s*=\s*"(.+?)"', r'version = "{}"'),
+    (
+        "Python bindings crate",
+        REPO / "python" / "Cargo.toml",
+        r'^version\s*=\s*"(.+?)"',
+        r'version = "{}"',
+    ),
+    (
+        "Python package",
+        REPO / "python" / "pyproject.toml",
+        r'^version\s*=\s*"(.+?)"',
+        r'version = "{}"',
+    ),
+    (
+        "Node bindings crate",
+        REPO / "node" / "Cargo.toml",
+        r'^version\s*=\s*"(.+?)"',
+        r'version = "{}"',
+    ),
+    (
+        "npm package",
+        REPO / "node" / "package.json",
+        r'^\s*"version":\s*"(.+?)",?',
+        r'  "version": "{}",',
+    ),
 ]
 
 
@@ -80,7 +90,7 @@ def main():
         return
 
     new_version = sys.argv[1]
-    if not re.match(r'^\d+\.\d+\.\d+', new_version):
+    if not re.match(r"^\d+\.\d+\.\d+", new_version):
         print(f"ERROR: '{new_version}' does not look like a semver version")
         sys.exit(1)
 
@@ -90,8 +100,10 @@ def main():
 
     print(f"\nBumping to {new_version}:")
     write_versions(new_version)
-    print("\nDon't forget to update the tag example in README.md "
-          f"({common} → {new_version}) if needed.")
+    print(
+        "\nDon't forget to update the tag example in README.md "
+        f"({common} → {new_version}) if needed."
+    )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 use super::{
-    replace, util, ContentMatch, ContentMatchError, Fragment, Mark, MarkSet, ReplaceError, ResolveErr,
-    ResolvedPos, Schema, Slice, TextNode,
+    replace, util, ContentMatch, ContentMatchError, Fragment, Mark, MarkSet, ReplaceError,
+    ResolveErr, ResolvedPos, Schema, Slice, TextNode,
 };
 use displaydoc::Display;
 use serde::{Deserialize, Serialize, Serializer};
@@ -323,7 +323,13 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
 
     /// Test whether a single node of the given type can replace the given range.
     fn can_replace_with(&self, from: usize, to: usize, node_type: S::NodeType) -> bool {
-        self.r#type().can_replace_with(from, to, node_type)
+        self.content_match_at(from)
+            .ok()
+            .and_then(|m| m.match_type(node_type))
+            .and_then(|m| {
+                m.match_fragment_range(self.content().unwrap_or(Fragment::EMPTY_REF), to..)
+            })
+            .is_some_and(|m| m.valid_end())
     }
 
     /// Test whether replacing the range between `from` and `to` (by
@@ -402,7 +408,13 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
     }
 
     /// Invoke a callback for all descendant nodes between `from` and `to`
-    fn nodes_between<F: FnMut(&S::Node, usize) -> bool>(&self, from: usize, to: usize, f: &mut F, offset: usize) {
+    fn nodes_between<F: FnMut(&S::Node, usize) -> bool>(
+        &self,
+        from: usize,
+        to: usize,
+        f: &mut F,
+        offset: usize,
+    ) {
         if let Some(c) = self.content() {
             c.nodes_between(from, to, f, offset);
         }
@@ -419,7 +431,10 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
         if std::ptr::eq(self, other) {
             return true;
         }
-        if self.r#type() != other.r#type() || self.marks() != other.marks() {
+        if self.r#type() != other.r#type()
+            || self.attrs_json() != other.attrs_json()
+            || self.marks() != other.marks()
+        {
             return false;
         }
         match (self.text_node(), other.text_node()) {
@@ -435,23 +450,30 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
 
     /// Test whether this node has the same markup (type, attrs, marks) as another
     fn same_markup(&self, other: &S::Node) -> bool {
-        self.r#type() == other.r#type() && self.marks() == other.marks()
+        self.r#type() == other.r#type()
+            && self.attrs_json() == other.attrs_json()
+            && self.marks() == other.marks()
     }
 
     /// Test whether a range of this node has the given mark type
     fn range_has_mark(&self, from: usize, to: usize, mark_type: S::MarkType) -> bool {
         let mut found = false;
-        self.nodes_between(from, to, &mut |node, _pos| {
-            if let Some(marks) = node.marks() {
-                for m in marks {
-                    if m.r#type() == mark_type {
-                        found = true;
-                        return false;
+        self.nodes_between(
+            from,
+            to,
+            &mut |node, _pos| {
+                if let Some(marks) = node.marks() {
+                    for m in marks {
+                        if m.r#type() == mark_type {
+                            found = true;
+                            return false;
+                        }
                     }
                 }
-            }
-            true
-        }, 0);
+                true
+            },
+            0,
+        );
         found
     }
 

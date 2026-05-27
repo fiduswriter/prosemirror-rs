@@ -1,8 +1,6 @@
 //! Smart replace algorithm: `replace_step()` function and the internal `Fitter`.
 
-use crate::model::{
-    ContentMatch, Fragment, Node, NodeType, ResolvedPos, Schema, Slice,
-};
+use crate::model::{ContentMatch, Fragment, Node, NodeType, ResolvedPos, Schema, Slice};
 use crate::transform::replace_step::{ReplaceAroundStep, ReplaceStep};
 use crate::transform::Span;
 use crate::transform::Step;
@@ -80,11 +78,7 @@ struct Fitter<S: Schema> {
 
 #[allow(dead_code)]
 impl<S: Schema> Fitter<S> {
-    fn new(
-        from_rp: ResolvedPos<S>,
-        to_rp: ResolvedPos<S>,
-        slice: Slice<S>,
-    ) -> Self {
+    fn new(from_rp: ResolvedPos<S>, to_rp: ResolvedPos<S>, slice: Slice<S>) -> Self {
         let from_pos = from_rp.pos;
         let to_pos = to_rp.pos;
         let doc = from_rp.doc();
@@ -261,11 +255,8 @@ impl<S: Schema> Fitter<S> {
                             });
                         }
                         if let Some(f) = first {
-                            let inject = match_.fill_before(
-                                &Fragment::from(vec![f.clone()]),
-                                false,
-                                0,
-                            );
+                            let inject =
+                                match_.fill_before(&Fragment::from(vec![f.clone()]), false, 0);
                             if inject.is_some() {
                                 return Some(Fittable {
                                     slice_depth,
@@ -311,11 +302,7 @@ impl<S: Schema> Fitter<S> {
         } else {
             0
         };
-        self.unplaced = Slice::new(
-            content,
-            open_start + 1,
-            usize::max(open_end, new_open_end),
-        );
+        self.unplaced = Slice::new(content, open_start + 1, usize::max(open_end, new_open_end));
         true
     }
 
@@ -329,7 +316,11 @@ impl<S: Schema> Fitter<S> {
             self.unplaced = Slice::new(
                 drop_from_fragment(&content, open_start - 1, 1),
                 open_start - 1,
-                if open_at_end { open_start - 1 } else { open_end },
+                if open_at_end {
+                    open_start - 1
+                } else {
+                    open_end
+                },
             );
         } else {
             self.unplaced = Slice::new(
@@ -366,7 +357,11 @@ impl<S: Schema> Fitter<S> {
                     if taken > 1 || open_start == 0 || next.content_size() > 0 {
                         match_ = matches;
                         let oc = if taken == 1 { open_start as isize } else { 0 };
-                        let oe = if taken == fragment.child_count() { open_end_count } else { -1 };
+                        let oe = if taken == fragment.child_count() {
+                            open_end_count
+                        } else {
+                            -1
+                        };
                         let closed = close_node_start::<S>(next, oc, oe);
                         add.push(closed);
                     }
@@ -438,13 +433,8 @@ impl<S: Schema> Fitter<S> {
         if !top.node_type.is_textblock() {
             return 0;
         }
-        let after_fits = content_after_fits(
-            &to_rp,
-            self.to_depth,
-            top.node_type,
-            top.match_,
-            false,
-        );
+        let after_fits =
+            content_after_fits(&to_rp, self.to_depth, top.node_type, top.match_, false);
         if after_fits.is_none() {
             return 0;
         }
@@ -473,8 +463,7 @@ impl<S: Schema> Fitter<S> {
         for i in (0..=max_depth).rev() {
             let match_ = self.frontier[i].match_;
             let type_ = self.frontier[i].node_type;
-            let drop_inner = i < to.depth
-                && to.end(i + 1) == to.pos + (to.depth - (i + 1));
+            let drop_inner = i < to.depth && to.end(i + 1) == to.pos + (to.depth - (i + 1));
             let fit = content_after_fits(to, i, type_, match_, drop_inner);
             if fit.is_none() {
                 continue;
@@ -544,13 +533,13 @@ impl<S: Schema> Fitter<S> {
             let fill = node
                 .r#type()
                 .content_match()
-                .fill_before(
-                    node.content().unwrap_or(Fragment::EMPTY_REF),
-                    true,
-                    index,
-                )
+                .fill_before(node.content().unwrap_or(Fragment::EMPTY_REF), true, index)
                 .unwrap_or_default();
-            let fill_opt = if fill.child_count() > 0 { Some(fill) } else { None };
+            let fill_opt = if fill.child_count() > 0 {
+                Some(fill)
+            } else {
+                None
+            };
             self.open_frontier_node(node.r#type(), fill_opt);
         }
 
@@ -578,8 +567,7 @@ impl<S: Schema> Fitter<S> {
         let empty = Fragment::new();
         if let Some(add) = open.match_.fill_before(&empty, true, 0) {
             if add.child_count() > 0 {
-                self.placed =
-                    add_to_fragment(&self.placed, self.frontier.len(), &add);
+                self.placed = add_to_fragment(&self.placed, self.frontier.len(), &add);
             }
         }
     }
@@ -639,11 +627,7 @@ fn content_at<S: Schema>(fragment: &Fragment<S>, depth: usize) -> Fragment<S> {
     cur
 }
 
-fn close_node_start<S: Schema>(
-    node: &S::Node,
-    open_start: isize,
-    open_end: isize,
-) -> S::Node {
+fn close_node_start<S: Schema>(node: &S::Node, open_start: isize, open_end: isize) -> S::Node {
     if open_start <= 0 {
         return node.clone();
     }
@@ -693,24 +677,18 @@ fn content_after_fits<S: Schema>(
     if index == node.child_count() && !type_.compatible_content(node.r#type()) {
         return None;
     }
-    let fit = match_.fill_before(
-        node.content().unwrap_or(Fragment::EMPTY_REF),
-        true,
-        index,
-    );
+    let fit = match_.fill_before(node.content().unwrap_or(Fragment::EMPTY_REF), true, index);
     match fit {
-        Some(ref f) if !invalid_marks(type_, node.content().unwrap_or(Fragment::EMPTY_REF), index) => {
+        Some(ref f)
+            if !invalid_marks(type_, node.content().unwrap_or(Fragment::EMPTY_REF), index) =>
+        {
             Some(f.clone())
         }
         _ => None,
     }
 }
 
-fn invalid_marks<S: Schema>(
-    type_: S::NodeType,
-    fragment: &Fragment<S>,
-    start: usize,
-) -> bool {
+fn invalid_marks<S: Schema>(type_: S::NodeType, fragment: &Fragment<S>, start: usize) -> bool {
     for i in start..fragment.child_count() {
         if let Some(child) = fragment.maybe_child(i) {
             if let Some(marks) = child.marks() {
@@ -734,9 +712,8 @@ pub fn close_fragment<S: Schema>(
     let mut fragment = fragment.clone();
     if depth < old_open {
         if let Some(first) = fragment.first_child() {
-            let new_first = first.copy(|c| {
-                close_fragment(c, depth + 1, old_open, new_open, Some(first))
-            });
+            let new_first =
+                first.copy(|c| close_fragment(c, depth + 1, old_open, new_open, Some(first)));
             fragment = fragment.replace_child(0, new_first).into_owned();
         }
     }
@@ -759,17 +736,12 @@ pub fn close_fragment<S: Schema>(
 }
 
 /// Compute the list of depths fully covered by the given range.
-pub fn covered_depths<S: Schema>(
-    from: &ResolvedPos<S>,
-    to: &ResolvedPos<S>,
-) -> Vec<usize> {
+pub fn covered_depths<S: Schema>(from: &ResolvedPos<S>, to: &ResolvedPos<S>) -> Vec<usize> {
     let mut result = Vec::new();
     let min_depth = usize::min(from.depth, to.depth);
     for d in (0..=min_depth).rev() {
         let start = from.start(d);
-        if start < from.pos - (from.depth - d)
-            || to.end(d) > to.pos + (to.depth - d)
-        {
+        if start < from.pos - (from.depth - d) || to.end(d) > to.pos + (to.depth - d) {
             break;
         }
         if start == to.start(d)

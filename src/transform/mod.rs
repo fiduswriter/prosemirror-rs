@@ -1,13 +1,13 @@
 //! # The document transformations
 //!
+mod attr_step;
 pub mod map;
 mod mark_step;
+mod node_mark_step;
 mod replace;
 mod replace_step;
 mod step;
 pub mod structure;
-mod attr_step;
-mod node_mark_step;
 #[allow(clippy::module_inception)]
 pub mod transform;
 
@@ -33,7 +33,12 @@ pub type Steps<S: Schema> = Vec<Step<S>>;
 
 /// Steps that can be applied on a document
 #[derive(Derivative, Deserialize, Serialize)]
-#[derivative(Debug(bound = ""), PartialEq(bound = ""), Eq(bound = ""), Clone(bound = ""))]
+#[derivative(
+    Debug(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = ""),
+    Clone(bound = "")
+)]
 #[serde(bound = "", tag = "stepType", rename_all = "camelCase")]
 pub enum Step<S: Schema> {
     /// Replace some content
@@ -151,9 +156,9 @@ mod tests {
 
     #[test]
     fn test_attr_step_serialize() {
-        let s: Step<Dyn> = serde_json::from_str(
-            r#"{"stepType":"attr","pos":1,"attr":"level","value":2}"#,
-        ).unwrap();
+        let s: Step<Dyn> =
+            serde_json::from_str(r#"{"stepType":"attr","pos":1,"attr":"level","value":2}"#)
+                .unwrap();
         match &s {
             Step::Attr(a) => {
                 assert_eq!(a.pos, 1);
@@ -165,9 +170,9 @@ mod tests {
 
     #[test]
     fn test_doc_attr_step_serialize() {
-        let s: Step<Dyn> = serde_json::from_str(
-            r#"{"stepType":"docAttr","attr":"title","value":"hello"}"#,
-        ).unwrap();
+        let s: Step<Dyn> =
+            serde_json::from_str(r#"{"stepType":"docAttr","attr":"title","value":"hello"}"#)
+                .unwrap();
         match &s {
             Step::DocAttr(d) => {
                 assert_eq!(d.attr, "title");
@@ -261,13 +266,15 @@ mod tests {
     fn test_doc_attr_step_applies() {
         let schema = basic_schema();
         schema.with_types(|| {
-            let doc = schema.node_from_json(&serde_json::json!({
-                "type": "doc",
-                "content": [{
-                    "type": "paragraph",
-                    "content": [{"type": "text", "text": "hello"}]
-                }]
-            })).unwrap();
+            let doc = schema
+                .node_from_json(&serde_json::json!({
+                    "type": "doc",
+                    "content": [{
+                        "type": "paragraph",
+                        "content": [{"type": "text", "text": "hello"}]
+                    }]
+                }))
+                .unwrap();
 
             // Set a doc-level attribute
             let step: Step<Dyn> = Step::DocAttr(DocAttrStep {
@@ -290,13 +297,15 @@ mod tests {
     fn test_doc_attr_step_replaces_attr() {
         let schema = basic_schema();
         schema.with_types(|| {
-            let doc = schema.node_from_json(&serde_json::json!({
-                "type": "doc",
-                "content": [{
-                    "type": "paragraph",
-                    "content": [{"type": "text", "text": "hello"}]
-                }]
-            })).unwrap();
+            let doc = schema
+                .node_from_json(&serde_json::json!({
+                    "type": "doc",
+                    "content": [{
+                        "type": "paragraph",
+                        "content": [{"type": "text", "text": "hello"}]
+                    }]
+                }))
+                .unwrap();
 
             // Set a doc-level attribute
             let step1: Step<Dyn> = Step::DocAttr(DocAttrStep {
@@ -320,23 +329,37 @@ mod tests {
     fn test_doc_attr_step_multiple_attrs() {
         let schema = basic_schema();
         schema.with_types(|| {
-            let doc = schema.node_from_json(&serde_json::json!({
-                "type": "doc",
-                "content": [{
-                    "type": "paragraph",
-                    "content": [{"type": "text", "text": "hello"}]
-                }]
-            })).unwrap();
+            let doc = schema
+                .node_from_json(&serde_json::json!({
+                    "type": "doc",
+                    "content": [{
+                        "type": "paragraph",
+                        "content": [{"type": "text", "text": "hello"}]
+                    }]
+                }))
+                .unwrap();
 
             // Set multiple doc-level attributes
             let steps = vec![
-                ("documentstyle", serde_json::Value::String("elephant".to_string())),
+                (
+                    "documentstyle",
+                    serde_json::Value::String("elephant".to_string()),
+                ),
                 ("tracked", serde_json::Value::Bool(false)),
-                ("citationstyle", serde_json::Value::String("apa".to_string())),
+                (
+                    "citationstyle",
+                    serde_json::Value::String("apa".to_string()),
+                ),
                 ("language", serde_json::Value::String("en-US".to_string())),
                 ("papersize", serde_json::Value::String("A4".to_string())),
-                ("template", serde_json::Value::String("Standard Article".to_string())),
-                ("import_id", serde_json::Value::String("standard-article".to_string())),
+                (
+                    "template",
+                    serde_json::Value::String("Standard Article".to_string()),
+                ),
+                (
+                    "import_id",
+                    serde_json::Value::String("standard-article".to_string()),
+                ),
             ];
 
             let mut doc: DynamicNode = doc;
@@ -397,14 +420,16 @@ mod tests {
     fn test_attr_step_applies_to_child_node() {
         let schema = basic_schema();
         schema.with_types(|| {
-            let doc = schema.node_from_json(&serde_json::json!({
-                "type": "doc",
-                "content": [{
-                    "type": "heading",
-                    "attrs": {"level": 1},
-                    "content": [{"type": "text", "text": "title"}]
-                }]
-            })).unwrap();
+            let doc = schema
+                .node_from_json(&serde_json::json!({
+                    "type": "doc",
+                    "content": [{
+                        "type": "heading",
+                        "attrs": {"level": 1},
+                        "content": [{"type": "text", "text": "title"}]
+                    }]
+                }))
+                .unwrap();
 
             // Change heading level from 1 to 2.
             // Position 1 is the start of the heading (after doc open, before heading open).
@@ -426,13 +451,15 @@ mod tests {
     fn test_attr_step_invalid_position() {
         let schema = basic_schema();
         schema.with_types(|| {
-            let doc = schema.node_from_json(&serde_json::json!({
-                "type": "doc",
-                "content": [{
-                    "type": "paragraph",
-                    "content": [{"type": "text", "text": "hello"}]
-                }]
-            })).unwrap();
+            let doc = schema
+                .node_from_json(&serde_json::json!({
+                    "type": "doc",
+                    "content": [{
+                        "type": "paragraph",
+                        "content": [{"type": "text", "text": "hello"}]
+                    }]
+                }))
+                .unwrap();
 
             // Position 999 is out of bounds
             let step: Step<Dyn> = Step::Attr(AttrStep {
@@ -447,9 +474,9 @@ mod tests {
 
     #[test]
     fn test_add_mark_step_serialize() {
-        let s: Step<Dyn> = serde_json::from_str(
-            r#"{"stepType":"addMark","mark":{"type":"em"},"from":1,"to":5}"#,
-        ).unwrap();
+        let s: Step<Dyn> =
+            serde_json::from_str(r#"{"stepType":"addMark","mark":{"type":"em"},"from":1,"to":5}"#)
+                .unwrap();
         match &s {
             Step::AddMark(am) => {
                 assert_eq!(am.span.from, 1);

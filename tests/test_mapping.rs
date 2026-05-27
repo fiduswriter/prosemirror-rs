@@ -23,9 +23,17 @@ fn mk(maps: Vec<TestMap>) -> Mapping {
 fn test_mapping(mapping: &Mapping, cases: &[(usize, usize, i32, bool)]) {
     let inverted = mapping.invert();
     for &(from, to, bias, lossy) in cases {
-        assert_eq!(mapping.map(from, bias), to, "map({from}, {bias}) should be {to}");
+        assert_eq!(
+            mapping.map(from, bias),
+            to,
+            "map({from}, {bias}) should be {to}"
+        );
         if !lossy {
-            assert_eq!(inverted.map(to, bias), from, "inverse map({to}, {bias}) should be {from}");
+            assert_eq!(
+                inverted.map(to, bias),
+                from,
+                "inverse map({to}, {bias}) should be {from}"
+            );
         }
     }
 }
@@ -33,43 +41,65 @@ fn test_mapping(mapping: &Mapping, cases: &[(usize, usize, i32, bool)]) {
 fn test_del(mapping: &Mapping, pos: usize, side: i32, flags: &str) {
     let r = mapping.map_result(pos, side);
     let mut found = String::new();
-    if r.deleted() { found.push('d'); }
-    if r.deleted_before() { found.push('b'); }
-    if r.deleted_after() { found.push('a'); }
-    if r.deleted_across() { found.push('x'); }
+    if r.deleted() {
+        found.push('d');
+    }
+    if r.deleted_before() {
+        found.push('b');
+    }
+    if r.deleted_after() {
+        found.push('a');
+    }
+    if r.deleted_across() {
+        found.push('x');
+    }
     assert_eq!(found, flags, "deletion flags at pos={pos} side={side}");
 }
 
 #[test]
 fn map_through_single_insertion() {
     let m = mk(vec![(vec![2, 0, 4], None)]);
-    test_mapping(&m, &[(0, 0, 1, false), (2, 6, 1, false), (2, 2, -1, false), (3, 7, 1, false)]);
+    test_mapping(
+        &m,
+        &[
+            (0, 0, 1, false),
+            (2, 6, 1, false),
+            (2, 2, -1, false),
+            (3, 7, 1, false),
+        ],
+    );
 }
 
 #[test]
 fn map_through_single_deletion() {
     let m = mk(vec![(vec![2, 4, 0], None)]);
-    test_mapping(&m, &[
-        (0, 0, 1, false),
-        (2, 2, -1, false),
-        (3, 2, 1, true),    // deleted
-        (6, 2, 1, false),
-        (6, 2, -1, true),   // deleted
-        (7, 3, 1, false),
-    ]);
+    test_mapping(
+        &m,
+        &[
+            (0, 0, 1, false),
+            (2, 2, -1, false),
+            (3, 2, 1, true), // deleted
+            (6, 2, 1, false),
+            (6, 2, -1, true), // deleted
+            (7, 3, 1, false),
+        ],
+    );
 }
 
 #[test]
 fn map_through_single_replace() {
     let m = mk(vec![(vec![2, 4, 4], None)]);
-    test_mapping(&m, &[
-        (0, 0, 1, false),
-        (2, 2, 1, false),
-        (4, 6, 1, true),    // deleted
-        (4, 2, -1, true),   // deleted
-        (6, 6, -1, false),
-        (8, 8, 1, false),
-    ]);
+    test_mapping(
+        &m,
+        &[
+            (0, 0, 1, false),
+            (2, 2, 1, false),
+            (4, 6, 1, true),  // deleted
+            (4, 2, -1, true), // deleted
+            (6, 6, -1, false),
+            (8, 8, 1, false),
+        ],
+    );
 }
 
 #[test]

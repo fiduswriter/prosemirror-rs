@@ -6,8 +6,8 @@
 //! from `true` to `false` by wrapping the existing content in a new node
 //! with updated attributes.
 
-use prosemirror::dynamic::DynamicSchema;
 use prosemirror::dynamic::types::Dyn;
+use prosemirror::dynamic::DynamicSchema;
 use prosemirror::transform::Step;
 
 fn article_schema() -> DynamicSchema {
@@ -174,8 +174,8 @@ fn replace_around_unhides_abstract_part() {
             "abstract part should start hidden"
         );
 
-        let step: Step<Dyn> = serde_json::from_value(replace_around_step_json())
-            .expect("step should deserialize");
+        let step: Step<Dyn> =
+            serde_json::from_value(replace_around_step_json()).expect("step should deserialize");
 
         let result = step.apply(&doc);
 
@@ -192,7 +192,9 @@ fn replace_around_unhides_abstract_part() {
 
         // The paragraph inside should be preserved.
         assert_eq!(new_abstract.child_count(), 1);
-        let inner = new_abstract.child(0).expect("abstract should still have a paragraph");
+        let inner = new_abstract
+            .child(0)
+            .expect("abstract should still have a paragraph");
         assert_eq!(inner.type_name, "paragraph");
     });
 }

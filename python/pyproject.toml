@@ -30,3 +30,11 @@ Documentation = "https://github.com/fiduswriter/prosemirror-rs#readme"
 python-source = "python"
 module-name = "prosemirror_rs.prosemirror_rs"
 features = ["pyo3/extension-module"]
+
+[tool.ruff]
+line-length = 100
+exclude = ["python/tests/upstream/"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

@@ -4,7 +4,11 @@ use crate::model::{ContentMatch, Node, NodeType, ResolvedPos, Schema, Slice};
 
 /// Test whether a node can be cut at the given child indices.
 pub fn can_cut<S: Schema>(node: &S::Node, start: usize, end: usize) -> bool {
-    if start == 0 || node.can_replace(start, node.child_count(), None, ..).unwrap_or(false) {
+    if start == 0
+        || node
+            .can_replace(start, node.child_count(), None, ..)
+            .unwrap_or(false)
+    {
         end == node.child_count() || node.can_replace(0, end, None, ..).unwrap_or(false)
     } else {
         false
@@ -25,7 +29,11 @@ pub fn lift_target<S: Schema>(range: &NodeRange<S>) -> Option<usize> {
         let node = range.from.node(depth);
         let index = range.from.index(depth) + content_before;
         let end_index = range.to.index_after(depth).saturating_sub(content_after);
-        if depth < range.depth && node.can_replace(index, end_index, Some(&content), ..).unwrap_or(false) {
+        if depth < range.depth
+            && node
+                .can_replace(index, end_index, Some(&content), ..)
+                .unwrap_or(false)
+        {
             return Some(depth);
         }
         if depth == 0 || !can_cut::<S>(node, index, end_index) {
@@ -119,8 +127,7 @@ pub fn find_wrapping_inside<S: Schema>(
 pub fn can_change_type<S: Schema>(doc: &S::Node, pos: usize, node_type: S::NodeType) -> bool {
     if let Ok(pos_) = doc.resolve(pos) {
         let index = pos_.index(pos_.depth);
-        pos_.parent()
-            .can_replace_with(index, index + 1, node_type)
+        pos_.parent().can_replace_with(index, index + 1, node_type)
     } else {
         false
     }
@@ -148,11 +155,22 @@ pub fn can_split<S: Schema>(
         .and_then(|t| t.last().copied())
         .unwrap_or_else(|| pos_.parent().r#type());
 
-    if !pos_.parent().can_replace(pos_.index(pos_.depth), pos_.parent().child_count(), None, ..).unwrap_or(false) {
+    if !pos_
+        .parent()
+        .can_replace(
+            pos_.index(pos_.depth),
+            pos_.parent().child_count(),
+            None,
+            ..,
+        )
+        .unwrap_or(false)
+    {
         return false;
     }
     if let Some(content) = pos_.parent().content() {
-        if !inner_type.valid_content(&content.cut_by_index(pos_.index(pos_.depth), content.child_count())) {
+        if !inner_type
+            .valid_content(&content.cut_by_index(pos_.index(pos_.depth), content.child_count()))
+        {
             return false;
         }
     }
@@ -185,7 +203,9 @@ pub fn can_split<S: Schema>(
                 })
                 .unwrap_or_else(|| node.r#type());
 
-            if !node.can_replace(index + 1, node.child_count(), None, ..).unwrap_or(false)
+            if !node
+                .can_replace(index + 1, node.child_count(), None, ..)
+                .unwrap_or(false)
                 || !after_type.valid_content(&rest_to_check)
             {
                 return false;
@@ -227,14 +247,18 @@ pub fn join_point<S: Schema>(doc: &S::Node, pos: usize, dir: Option<i32>) -> Opt
             let idx = pos_.index(d) + 1;
             (
                 Some(std::borrow::Cow::Borrowed(pos_.node(d + 1))),
-                pos_.node(d).maybe_child(idx).map(std::borrow::Cow::Borrowed),
+                pos_.node(d)
+                    .maybe_child(idx)
+                    .map(std::borrow::Cow::Borrowed),
                 idx,
             )
         } else {
             let idx = pos_.index(d);
             (
                 if idx > 0 {
-                    pos_.node(d).maybe_child(idx - 1).map(std::borrow::Cow::Borrowed)
+                    pos_.node(d)
+                        .maybe_child(idx - 1)
+                        .map(std::borrow::Cow::Borrowed)
                 } else {
                     None
                 },
@@ -266,13 +290,12 @@ pub fn join_point<S: Schema>(doc: &S::Node, pos: usize, dir: Option<i32>) -> Opt
 }
 
 /// Find a valid insertion point for the given node type.
-pub fn insert_point<S: Schema>(
-    doc: &S::Node,
-    pos: usize,
-    node_type: S::NodeType,
-) -> Option<usize> {
+pub fn insert_point<S: Schema>(doc: &S::Node, pos: usize, node_type: S::NodeType) -> Option<usize> {
     let pos_ = doc.resolve(pos).ok()?;
-    if pos_.parent().can_replace_with(pos_.index(pos_.depth), pos_.index(pos_.depth), node_type) {
+    if pos_
+        .parent()
+        .can_replace_with(pos_.index(pos_.depth), pos_.index(pos_.depth), node_type)
+    {
         return Some(pos);
     }
     if pos_.parent_offset == 0 {
@@ -301,11 +324,7 @@ pub fn insert_point<S: Schema>(
 }
 
 /// Find a valid drop point for the given slice.
-pub fn drop_point<S: Schema>(
-    doc: &S::Node,
-    pos: usize,
-    slice: &Slice<S>,
-) -> Option<usize> {
+pub fn drop_point<S: Schema>(doc: &S::Node, pos: usize, slice: &Slice<S>) -> Option<usize> {
     if slice.content.size() == 0 {
         return Some(pos);
     }
@@ -331,7 +350,9 @@ pub fn drop_point<S: Schema>(
             let insert_pos = pos_.index(d) + if bias > 0 { 1 } else { 0 };
             let parent = pos_.node(d);
             let fits = if pass == 1 {
-                parent.can_replace(insert_pos, insert_pos, Some(content), ..).unwrap_or(false)
+                parent
+                    .can_replace(insert_pos, insert_pos, Some(content), ..)
+                    .unwrap_or(false)
             } else {
                 match content.first_child() {
                     Some(first) => {
@@ -340,8 +361,7 @@ pub fn drop_point<S: Schema>(
                             .ok()
                             .and_then(|m| m.find_wrapping(first.r#type()));
                         wrapping.is_some()
-                            && parent
-                                .can_replace_with(insert_pos, insert_pos, wrapping.unwrap()[0])
+                            && parent.can_replace_with(insert_pos, insert_pos, wrapping.unwrap()[0])
                     }
                     None => false,
                 }
@@ -363,9 +383,7 @@ pub fn drop_point<S: Schema>(
 /// Check if two nodes are joinable (compatible content)
 pub fn joinable<S: Schema>(a: Option<&S::Node>, b: Option<&S::Node>) -> bool {
     match (a, b) {
-        (Some(a), Some(b)) => {
-            !a.is_leaf() && a.r#type().compatible_content(b.r#type())
-        }
+        (Some(a), Some(b)) => !a.is_leaf() && a.r#type().compatible_content(b.r#type()),
         _ => false,
     }
 }

@@ -63,7 +63,8 @@ pub struct ResolvedPos<'a, S: Schema> {
     /// The position that was resolved
     pub pos: usize,
     path: Vec<ResolvedNode<'a, S>>,
-    pub(crate) parent_offset: usize,
+    /// The offset into the parent node
+    pub parent_offset: usize,
     /// The depth of the deepest resolved ancestor
     pub depth: usize,
 }
@@ -201,7 +202,34 @@ impl<'a, S: Schema> ResolvedPos<'a, S> {
         0
     }
 
-    pub(crate) fn resolve(doc: &'a S::Node, pos: usize) -> Result<Self, ResolveErr> {
+    /// Returns the range around this position that can be lifted.
+    #[allow(clippy::type_complexity)]
+    pub fn block_range(
+        &self,
+        other: Option<&ResolvedPos<'a, S>>,
+        pred: Option<&dyn Fn(&S::Node) -> bool>,
+    ) -> Option<NodeRange<'a, S>> {
+        let other = other.unwrap_or(self);
+        if other.pos < self.pos {
+            return other.block_range(Some(self), pred);
+        }
+        let start_d =
+            self.depth
+                .saturating_sub(if self.parent().inline_content() || self.pos == other.pos {
+                    1
+                } else {
+                    0
+                });
+        for d in (0..=start_d).rev() {
+            if other.pos <= self.end(d) && pred.as_ref().is_none_or(|p| p(self.node(d))) {
+                return Some(NodeRange::new(self.clone(), other.clone(), d));
+            }
+        }
+        None
+    }
+
+    /// Resolve a position in the given document.
+    pub fn resolve(doc: &'a S::Node, pos: usize) -> Result<Self, ResolveErr> {
         if pos > doc.content().unwrap().size() {
             return Err(ResolveErr::RangeError { pos });
         }
@@ -281,31 +309,6 @@ impl<'a, S: Schema> ResolvedPos<'a, S> {
         Some(marks)
     }
 
-    /// Find the nearest block ancestor that contains both this position and `other`.
-    pub fn block_range<'b>(
-        &'b self,
-        other: &'b ResolvedPos<'a, S>,
-        _pred: Option<fn(&S::Node) -> bool>,
-    ) -> Option<NodeRange<'a, S>> {
-        let other = if other.pos < self.pos { self } else { other };
-        let _this = if other.pos < self.pos { other } else { self };
-        let mut d = if self.parent().is_inline() || self.pos == other.pos {
-            self.depth.saturating_sub(1)
-        } else {
-            self.depth
-        };
-        loop {
-            if other.pos <= self.end(d) {
-                return Some(NodeRange::new(self.clone(), other.clone(), d));
-            }
-            if d == 0 {
-                break;
-            }
-            d -= 1;
-        }
-        None
-    }
-
     /// Test whether two resolved positions have the same direct parent node.
     pub fn same_parent(&self, other: &ResolvedPos<S>) -> bool {
         self.pos - self.parent_offset == other.pos - other.parent_offset
@@ -313,19 +316,31 @@ impl<'a, S: Schema> ResolvedPos<'a, S> {
 
     /// Return the later of two resolved positions.
     pub fn max<'b>(&'b self, other: &'b ResolvedPos<'a, S>) -> &'b ResolvedPos<'a, S> {
-        if other.pos > self.pos { other } else { self }
+        if other.pos > self.pos {
+            other
+        } else {
+            self
+        }
     }
 
     /// Return the earlier of two resolved positions.
     pub fn min<'b>(&'b self, other: &'b ResolvedPos<'a, S>) -> &'b ResolvedPos<'a, S> {
-        if other.pos < self.pos { other } else { self }
+        if other.pos < self.pos {
+            other
+        } else {
+            self
+        }
     }
 
     /// Return the position at a given child index within the parent at the given depth.
     pub fn pos_at_index(&self, index: usize, depth: Option<usize>) -> usize {
         let depth = depth.unwrap_or(self.depth);
         let node = self.node(depth);
-        let mut pos = if depth == 0 { 0 } else { self.path[depth - 1].before + 1 };
+        let mut pos = if depth == 0 {
+            0
+        } else {
+            self.path[depth - 1].before + 1
+        };
         for i in 0..index {
             pos += node.child(i).map(|c| c.node_size()).unwrap_or(0);
         }

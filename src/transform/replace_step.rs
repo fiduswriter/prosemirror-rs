@@ -6,7 +6,12 @@ use serde::{Deserialize, Serialize};
 
 /// Replace some part of the document
 #[derive(Derivative, Deserialize, Serialize)]
-#[derivative(Debug(bound = ""), PartialEq(bound = ""), Eq(bound = ""), Clone(bound = ""))]
+#[derivative(
+    Debug(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = ""),
+    Clone(bound = "")
+)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct ReplaceStep<S: Schema> {
     /// The affected span
@@ -46,7 +51,9 @@ impl<S: Schema> StepKind<S> for ReplaceStep<S> {
                 from: self.span.from,
                 to: self.span.from + self.slice.size(),
             },
-            slice: doc.slice(self.span.from..self.span.to, false).unwrap_or_default(),
+            slice: doc
+                .slice(self.span.from..self.span.to, false)
+                .unwrap_or_default(),
             structure: false,
         })
     }
@@ -69,9 +76,7 @@ impl<S: Schema> StepKind<S> for ReplaceStep<S> {
 
     fn merge(&self, other: &super::Step<S>) -> Option<super::Step<S>> {
         match other {
-            super::Step::Replace(other)
-                if !other.structure && !self.structure =>
-            {
+            super::Step::Replace(other) if !other.structure && !self.structure => {
                 if self.span.from + self.slice.size() == other.span.from
                     && self.slice.open_end == 0
                     && other.slice.open_start == 0
@@ -80,7 +85,10 @@ impl<S: Schema> StepKind<S> for ReplaceStep<S> {
                         Slice::default()
                     } else {
                         Slice::new(
-                            self.slice.content.clone().append(other.slice.content.clone()),
+                            self.slice
+                                .content
+                                .clone()
+                                .append(other.slice.content.clone()),
                             self.slice.open_start,
                             other.slice.open_end,
                         )
@@ -101,7 +109,11 @@ impl<S: Schema> StepKind<S> for ReplaceStep<S> {
                         Slice::default()
                     } else {
                         Slice::new(
-                            other.slice.content.clone().append(self.slice.content.clone()),
+                            other
+                                .slice
+                                .content
+                                .clone()
+                                .append(self.slice.content.clone()),
                             other.slice.open_start,
                             self.slice.open_end,
                         )
@@ -125,7 +137,12 @@ impl<S: Schema> StepKind<S> for ReplaceStep<S> {
 
 /// Replace the document structure while keeping some content
 #[derive(Derivative, Deserialize, Serialize)]
-#[derivative(Debug(bound = ""), PartialEq(bound = ""), Eq(bound = ""), Clone(bound = ""))]
+#[derivative(
+    Debug(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = ""),
+    Clone(bound = "")
+)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct ReplaceAroundStep<S: Schema> {
     /// The affected part of the document
@@ -179,11 +196,11 @@ impl<S: Schema> StepKind<S> for ReplaceAroundStep<S> {
 
     fn invert(&self, doc: &S::Node) -> super::Step<S> {
         let gap = self.gap_to - self.gap_from;
-        let old_slice = doc.slice(self.span.from..self.span.to, false).unwrap_or_default();
-        let removed = old_slice.remove_between(
-            self.gap_from - self.span.from,
-            self.gap_to - self.span.from,
-        );
+        let old_slice = doc
+            .slice(self.span.from..self.span.to, false)
+            .unwrap_or_default();
+        let removed =
+            old_slice.remove_between(self.gap_from - self.span.from, self.gap_to - self.span.from);
         super::Step::ReplaceAround(ReplaceAroundStep {
             span: Span {
                 from: self.span.from,
@@ -235,17 +252,12 @@ pub(super) fn content_between<S: Schema>(
     let rp_from = doc.resolve(from)?;
     let mut dist = to - from;
     let mut depth = rp_from.depth;
-    while dist > 0
-        && depth > 0
-        && rp_from.index_after(depth) == rp_from.node(depth).child_count()
-    {
+    while dist > 0 && depth > 0 && rp_from.index_after(depth) == rp_from.node(depth).child_count() {
         depth -= 1;
         dist -= 1;
     }
     if dist > 0 {
-        let mut next = rp_from
-            .node(depth)
-            .maybe_child(rp_from.index_after(depth));
+        let mut next = rp_from.node(depth).maybe_child(rp_from.index_after(depth));
         while dist > 0 {
             match next {
                 Some(c) => {

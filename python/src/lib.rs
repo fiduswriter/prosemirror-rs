@@ -1,11 +1,14 @@
+mod model;
+mod transform;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
 use prosemirror::dynamic::types::Dyn;
 use prosemirror::dynamic::{DynamicNode, DynamicSchema};
 use prosemirror::transform::Step;
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Schema cache
@@ -85,7 +88,11 @@ impl Editor {
             .node_from_json(&doc_val)
             .map_err(|e| PyValueError::new_err(format!("Invalid document: {e}")))?;
 
-        Ok(Editor { schema, doc, version: 0 })
+        Ok(Editor {
+            schema,
+            doc,
+            version: 0,
+        })
     }
 
     /// Apply a single step to the document.
@@ -259,7 +266,8 @@ impl Editor {
     fn reset(&mut self, doc_json: &str) -> PyResult<()> {
         let doc_val: serde_json::Value = serde_json::from_str(doc_json)
             .map_err(|e| PyValueError::new_err(format!("Invalid document JSON: {e}")))?;
-        let doc = self.schema
+        let doc = self
+            .schema
             .node_from_json(&doc_val)
             .map_err(|e| PyValueError::new_err(format!("Invalid document: {e}")))?;
         self.doc = doc;
@@ -322,5 +330,28 @@ impl Editor {
 #[pymodule]
 fn prosemirror_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Editor>()?;
+    m.add_class::<model::PySchema>()?;
+    m.add_class::<model::PyNodeType>()?;
+    m.add_class::<model::PyMarkType>()?;
+    m.add_class::<model::PyNode>()?;
+    m.add_class::<model::PyFragment>()?;
+    m.add_class::<model::PySlice>()?;
+    m.add_class::<model::PyResolvedPos>()?;
+    m.add_class::<model::PyMark>()?;
+    m.add_class::<model::PyMarkSet>()?;
+    m.add_class::<transform::PyStepMap>()?;
+    m.add_class::<transform::PyMapResult>()?;
+    m.add_class::<transform::PyMapping>()?;
+    m.add_class::<transform::PyStepResult>()?;
+    m.add_class::<transform::PyStep>()?;
+    m.add_class::<transform::PyTransform>()?;
+    m.add_class::<model::PyNodeRange>()?;
+    m.add_function(wrap_pyfunction!(transform::py_lift_target, m)?)?;
+    m.add_function(wrap_pyfunction!(transform::py_can_split, m)?)?;
+    m.add_function(wrap_pyfunction!(transform::py_find_wrapping, m)?)?;
+    m.add_function(wrap_pyfunction!(transform::py_can_join, m)?)?;
+    m.add_function(wrap_pyfunction!(transform::py_join_point, m)?)?;
+    m.add_function(wrap_pyfunction!(transform::py_insert_point, m)?)?;
+    m.add_function(wrap_pyfunction!(transform::py_drop_point, m)?)?;
     Ok(())
 }

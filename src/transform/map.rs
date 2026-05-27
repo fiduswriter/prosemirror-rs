@@ -402,7 +402,9 @@ impl Mapping {
 
     /// Record a mirror pair
     pub fn set_mirror(&mut self, n: usize, m: usize) {
-        self.mirror.get_or_insert_with(Vec::new).extend_from_slice(&[n, m]);
+        self.mirror
+            .get_or_insert_with(Vec::new)
+            .extend_from_slice(&[n, m]);
     }
 
     /// Append the inverse of another mapping in reverse order

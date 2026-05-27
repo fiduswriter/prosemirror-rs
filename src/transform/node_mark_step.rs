@@ -10,7 +10,12 @@ use std::borrow::Cow;
 
 /// Adds a mark to a specific node at a given position.
 #[derive(Derivative, Deserialize, Serialize)]
-#[derivative(Debug(bound = ""), PartialEq(bound = ""), Eq(bound = ""), Clone(bound = ""))]
+#[derivative(
+    Debug(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = ""),
+    Clone(bound = "")
+)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct AddNodeMarkStep<S: Schema> {
     /// The position of the node
@@ -21,7 +26,12 @@ pub struct AddNodeMarkStep<S: Schema> {
 
 /// Removes a mark from a specific node at a given position.
 #[derive(Derivative, Deserialize, Serialize)]
-#[derivative(Debug(bound = ""), PartialEq(bound = ""), Eq(bound = ""), Clone(bound = ""))]
+#[derivative(
+    Debug(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = ""),
+    Clone(bound = "")
+)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct RemoveNodeMarkStep<S: Schema> {
     /// The position of the node

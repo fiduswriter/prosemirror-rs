@@ -127,6 +127,115 @@ impl<S: Schema> Fragment<S> {
         self.inner.len()
     }
 
+    /// Find the first position at which this fragment and another fragment differ,
+    /// or `None` if they are the same.
+    pub fn find_diff_start(&self, other: &Fragment<S>, pos: usize) -> Option<usize> {
+        let mut i = 0;
+        let mut pos = pos;
+        loop {
+            if i == self.inner.len() || i == other.inner.len() {
+                return if self.inner.len() == other.inner.len() {
+                    None
+                } else {
+                    Some(pos)
+                };
+            }
+            let child_a = &self.inner[i];
+            let child_b = &other.inner[i];
+            if child_a == child_b {
+                pos += child_a.node_size();
+                i += 1;
+                continue;
+            }
+            if !child_a.same_markup(child_b) {
+                return Some(pos);
+            }
+            if let (Some(a), Some(b)) = (child_a.text_node(), child_b.text_node()) {
+                if a.text != b.text {
+                    let mut j = 0;
+                    let a_str = a.text.as_str();
+                    let b_str = b.text.as_str();
+                    while j < a_str.len()
+                        && j < b_str.len()
+                        && a_str.as_bytes()[j] == b_str.as_bytes()[j]
+                    {
+                        j += 1;
+                    }
+                    return Some(pos + j);
+                }
+            }
+            if child_a.child_count() > 0 || child_b.child_count() > 0 {
+                if let (Some(a_content), Some(b_content)) = (child_a.content(), child_b.content()) {
+                    if let Some(inner) = a_content.find_diff_start(b_content, pos + 1) {
+                        return Some(inner);
+                    }
+                }
+            }
+            pos += child_a.node_size();
+            i += 1;
+        }
+    }
+
+    /// Find the last positions at which this fragment and another fragment differ,
+    /// scanning from the end. Returns `None` if they are the same.
+    pub fn find_diff_end(
+        &self,
+        other: &Fragment<S>,
+        mut pos_a: usize,
+        mut pos_b: usize,
+    ) -> Option<(usize, usize)> {
+        let mut i_a = self.inner.len();
+        let mut i_b = other.inner.len();
+        loop {
+            if i_a == 0 || i_b == 0 {
+                return if i_a == i_b {
+                    None
+                } else {
+                    Some((pos_a, pos_b))
+                };
+            }
+            i_a -= 1;
+            i_b -= 1;
+            let child_a = &self.inner[i_a];
+            let child_b = &other.inner[i_b];
+            let size = child_a.node_size();
+            if child_a == child_b {
+                pos_a -= size;
+                pos_b -= size;
+                continue;
+            }
+            if !child_a.same_markup(child_b) {
+                return Some((pos_a, pos_b));
+            }
+            if let (Some(a), Some(b)) = (child_a.text_node(), child_b.text_node()) {
+                if a.text != b.text {
+                    let a_str = a.text.as_str();
+                    let b_str = b.text.as_str();
+                    let mut same = 0;
+                    let min_size = a_str.len().min(b_str.len());
+                    while same < min_size
+                        && a_str.as_bytes()[a_str.len() - same - 1]
+                            == b_str.as_bytes()[b_str.len() - same - 1]
+                    {
+                        same += 1;
+                        pos_a -= 1;
+                        pos_b -= 1;
+                    }
+                    return Some((pos_a, pos_b));
+                }
+            }
+            if child_a.child_count() > 0 || child_b.child_count() > 0 {
+                if let (Some(a_content), Some(b_content)) = (child_a.content(), child_b.content()) {
+                    if let Some(inner) = a_content.find_diff_end(b_content, pos_a - 1, pos_b - 1) {
+                        return Some(inner);
+                    }
+                }
+            }
+            pos_a -= size;
+            pos_b -= size;
+        }
+    }
+
     /// Create a new fragment containing the combined content of this fragment and the other.
     pub fn append(mut self, mut other: Self) -> Self {
         if let Some(first) = other.first_child() {
@@ -210,12 +319,15 @@ impl<S: Schema> Fragment<S> {
         let mut pos = 0;
         for child in &self.inner {
             let end = pos + child.node_size();
+            if pos >= to {
+                break;
+            }
             if end > from && f(child, node_start + pos) {
                 if let Some(content) = child.content() {
                     let start = pos + 1;
                     content.nodes_between(
-                        usize::max(0, from - start),
-                        usize::min(content.size(), to - start),
+                        from.saturating_sub(start),
+                        content.size().min(to.saturating_sub(start)),
                         f,
                         node_start + start,
                     )

@@ -33,7 +33,12 @@ pub trait ContentMatch<S: Schema>: Copy {
 
     /// Find the nodes that need to be inserted before `after` to reach a valid
     /// accepting state. Returns `None` if no valid insertion exists.
-    fn fill_before(self, _after: &Fragment<S>, _to_end: bool, _start_index: usize) -> Option<Fragment<S>> {
+    fn fill_before(
+        self,
+        _after: &Fragment<S>,
+        _to_end: bool,
+        _start_index: usize,
+    ) -> Option<Fragment<S>> {
         None
     }
 

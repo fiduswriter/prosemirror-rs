@@ -41,7 +41,12 @@ where
 
 /// Adding a mark on some part of the document
 #[derive(Derivative, Deserialize, Serialize)]
-#[derivative(Debug(bound = ""), PartialEq(bound = ""), Eq(bound = ""), Clone(bound = ""))]
+#[derivative(
+    Debug(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = ""),
+    Clone(bound = "")
+)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct AddMarkStep<S: Schema> {
     /// The affected part of the document
@@ -53,7 +58,12 @@ pub struct AddMarkStep<S: Schema> {
 
 /// Removing a mark on some part of the document
 #[derive(Derivative, Deserialize, Serialize)]
-#[derivative(Debug(bound = ""), PartialEq(bound = ""), Eq(bound = ""), Clone(bound = ""))]
+#[derivative(
+    Debug(bound = ""),
+    PartialEq(bound = ""),
+    Eq(bound = ""),
+    Clone(bound = "")
+)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct RemoveMarkStep<S: Schema> {
     /// The affected part of the document

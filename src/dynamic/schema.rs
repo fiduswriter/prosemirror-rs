@@ -2,8 +2,8 @@
 
 use crate::dynamic::content_expr::{self, ContentExpr};
 use crate::dynamic::types::{
-    DynamicMark, DynamicMarkType, DynamicNode, DynamicNodeType, DynamicNodeTypeData,
-    DynamicMarkTypeData, DynTypeStore, DYN_TYPES,
+    DynTypeStore, DynamicMark, DynamicMarkType, DynamicMarkTypeData, DynamicNode, DynamicNodeType,
+    DynamicNodeTypeData, DYN_TYPES,
 };
 use crate::model::{Fragment, MarkSet, Node, NodeType};
 use serde::{Deserialize, Serialize};
@@ -45,7 +45,9 @@ pub struct SchemaSpec {
     pub top_node: String,
 }
 
-fn default_top_node() -> String { "doc".to_string() }
+fn default_top_node() -> String {
+    "doc".to_string()
+}
 
 /// Specification for a single node type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,7 +90,9 @@ pub struct NodeSpec {
     pub whitespace: Option<String>,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 fn split_space_separated_names(value: &str) -> Vec<String> {
     value
@@ -144,6 +148,18 @@ pub struct DynamicSchema {
     content_exprs: Vec<ContentExpr>,
     /// The type store for thread-local access
     store: Box<DynTypeStore>,
+}
+
+impl Default for DynamicSchema {
+    fn default() -> Self {
+        Self::from_json(&serde_json::json!({
+            "nodes": {
+                "doc": { "content": "text*" },
+                "text": {}
+            }
+        }))
+        .expect("Default schema should be valid")
+    }
 }
 
 impl DynamicSchema {
@@ -265,8 +281,12 @@ impl DynamicSchema {
                 // Text nodes are always inline in ProseMirror, even without explicit `inline: true`
                 inline: node_spec.inline || name == "text",
                 atom: node_spec.atom,
-                textblock: is_textblock, has_inline_content, content_expr_idx,
-                groups: groups_list, attrs, allowed_marks,
+                textblock: is_textblock,
+                has_inline_content,
+                content_expr_idx,
+                groups: groups_list,
+                attrs,
+                allowed_marks,
             });
         }
 
@@ -306,7 +326,11 @@ impl DynamicSchema {
                 .collect();
             mark_type_map.insert(name.clone(), idx);
             mark_types_data.push(DynamicMarkTypeData {
-                name: name.clone(), attrs, inclusive: mark_spec.inclusive, excludes, groups: groups_list,
+                name: name.clone(),
+                attrs,
+                inclusive: mark_spec.inclusive,
+                excludes,
+                groups: groups_list,
             });
         }
 
@@ -317,8 +341,14 @@ impl DynamicSchema {
         });
 
         Ok(DynamicSchema {
-            node_types: node_types_data, node_type_map, mark_types: mark_types_data,
-            mark_type_map, node_groups, top_node: spec.top_node, content_exprs, store,
+            node_types: node_types_data,
+            node_type_map,
+            mark_types: mark_types_data,
+            mark_type_map,
+            node_groups,
+            top_node: spec.top_node,
+            content_exprs,
+            store,
         })
     }
 
@@ -336,23 +366,32 @@ impl DynamicSchema {
         });
         let result = f();
         if !already_set {
-            DYN_TYPES.with(|cell| { cell.borrow_mut().take(); });
+            DYN_TYPES.with(|cell| {
+                cell.borrow_mut().take();
+            });
         }
         result
     }
 
     /// Get a node type by name.
     pub fn node_type(&self, name: &str) -> Option<DynamicNodeType> {
-        self.node_type_map.get(name).map(|&idx| DynamicNodeType { idx })
+        self.node_type_map
+            .get(name)
+            .map(|&idx| DynamicNodeType { idx })
     }
 
     /// Get a mark type by name.
     pub fn mark_type(&self, name: &str) -> Option<DynamicMarkType> {
-        self.mark_type_map.get(name).map(|&idx| DynamicMarkType { idx })
+        self.mark_type_map
+            .get(name)
+            .map(|&idx| DynamicMarkType { idx })
     }
 
     /// Create a node from a JSON value.
-    pub fn node_from_json(&self, json: &serde_json::Value) -> Result<DynamicNode, DynamicSchemaError> {
+    pub fn node_from_json(
+        &self,
+        json: &serde_json::Value,
+    ) -> Result<DynamicNode, DynamicSchemaError> {
         self.with_types(|| {
             serde_json::from_value::<DynamicNode>(json.clone())
                 .map_err(|e| DynamicSchemaError::InvalidSpec(e.to_string()))
@@ -360,7 +399,10 @@ impl DynamicSchema {
     }
 
     /// Create a mark from a JSON value.
-    pub fn mark_from_json(&self, json: &serde_json::Value) -> Result<DynamicMark, DynamicSchemaError> {
+    pub fn mark_from_json(
+        &self,
+        json: &serde_json::Value,
+    ) -> Result<DynamicMark, DynamicSchemaError> {
         self.with_types(|| {
             serde_json::from_value::<DynamicMark>(json.clone())
                 .map_err(|e| DynamicSchemaError::InvalidSpec(e.to_string()))
@@ -374,15 +416,20 @@ impl DynamicSchema {
 
     /// Create a node of the given type with content and marks.
     pub fn node(
-        &self, type_name: &str, _attrs: serde_json::Value,
-        content: Fragment<crate::dynamic::types::Dyn>, marks: MarkSet<crate::dynamic::types::Dyn>,
+        &self,
+        type_name: &str,
+        attrs: serde_json::Value,
+        content: Fragment<crate::dynamic::types::Dyn>,
+        marks: MarkSet<crate::dynamic::types::Dyn>,
     ) -> Result<DynamicNode, DynamicSchemaError> {
-        let idx = self.node_type_map.get(type_name)
+        let idx = self
+            .node_type_map
+            .get(type_name)
             .copied()
             .ok_or_else(|| DynamicSchemaError::UnknownNodeType(type_name.to_string()))?;
         self.with_types(|| {
             let nt = DynamicNodeType { idx };
-            Ok(nt.create_node(Some(&content), Some(&marks)))
+            Ok(nt.create(attrs, Some(&content), Some(&marks)))
         })
     }
 }
@@ -678,7 +725,10 @@ mod tests {
         let doc = schema.with_types(|| schema.node_from_json(&doc_json).unwrap());
         assert_eq!(doc.child_count(), 2);
         assert_eq!(doc.child(0).unwrap().attrs["level"], 2);
-        assert_eq!(doc.child(0).unwrap().child(0).unwrap().text_content(), "Title");
+        assert_eq!(
+            doc.child(0).unwrap().child(0).unwrap().text_content(),
+            "Title"
+        );
 
         // JSON round-trip
         let serialized = serde_json::to_value(&doc).unwrap();
@@ -705,13 +755,15 @@ mod tests {
     fn test_text_between() {
         let schema = DynamicSchema::from_json(&basic_spec_json()).unwrap();
         schema.with_types(|| {
-            let doc = schema.node_from_json(&serde_json::json!({
-                "type": "doc",
-                "content": [
-                    { "type": "paragraph", "content": [{ "type": "text", "text": "hello" }] },
-                    { "type": "paragraph", "content": [{ "type": "text", "text": "world" }] }
-                ]
-            })).unwrap();
+            let doc = schema
+                .node_from_json(&serde_json::json!({
+                    "type": "doc",
+                    "content": [
+                        { "type": "paragraph", "content": [{ "type": "text", "text": "hello" }] },
+                        { "type": "paragraph", "content": [{ "type": "text", "text": "world" }] }
+                    ]
+                }))
+                .unwrap();
             assert_eq!(doc.text_content(), "helloworld");
             assert_eq!(doc.child(0).unwrap().text_content(), "hello");
             assert_eq!(doc.child(1).unwrap().text_content(), "world");

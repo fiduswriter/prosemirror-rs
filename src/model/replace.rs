@@ -429,9 +429,7 @@ mod tests {
                 let node = schema.node_from_json(&n).unwrap();
                 (node.clone(), node.slice(r, false).unwrap())
             });
-            let slice = insert_node
-                .map(|(_, s)| s)
-                .unwrap_or_default();
+            let slice = insert_node.map(|(_, s)| s).unwrap_or_default();
             let expected_node = schema.node_from_json(&expected).unwrap();
             assert_eq!(doc.replace(range, &slice), Ok(expected_node));
             Ok(())
@@ -466,20 +464,27 @@ mod tests {
     fn join_on_delete() {
         let schema = basic_schema();
         schema.with_types(|| {
-            let doc = schema.node_from_json(&serde_json::json!({
-                "type": "doc",
-                "content": [
-                    {"type": "paragraph", "content": [{"type": "text", "text": "one"}]},
-                    {"type": "paragraph", "content": [{"type": "text", "text": "two"}]}
-                ]
-            })).unwrap();
+            let doc = schema
+                .node_from_json(&serde_json::json!({
+                    "type": "doc",
+                    "content": [
+                        {"type": "paragraph", "content": [{"type": "text", "text": "one"}]},
+                        {"type": "paragraph", "content": [{"type": "text", "text": "two"}]}
+                    ]
+                }))
+                .unwrap();
             let doc_type = doc.r#type();
             // Check that a single paragraph is valid content for doc
-            let para = schema.node_from_json(&serde_json::json!({
-                "type": "paragraph", "content": [{"type": "text", "text": "onwo"}]
-            })).unwrap();
+            let para = schema
+                .node_from_json(&serde_json::json!({
+                    "type": "paragraph", "content": [{"type": "text", "text": "onwo"}]
+                }))
+                .unwrap();
             let frag = Fragment::from(vec![para]);
-            assert!(doc_type.valid_content(&frag), "doc should accept a single paragraph");
+            assert!(
+                doc_type.valid_content(&frag),
+                "doc should accept a single paragraph"
+            );
             // Now do the replace
             let result = doc.replace(3..7, &Slice::default());
             assert!(result.is_ok(), "replace should succeed: {:?}", result.err());
@@ -576,10 +581,13 @@ mod tests {
     fn rejects_a_bad_fit() {
         let schema = basic_schema();
         schema.with_types(|| {
-            let doc = schema.node_from_json(&serde_json::json!({"type":"doc","content":[{"type":"paragraph"}]})).unwrap();
+            let doc = schema
+                .node_from_json(&serde_json::json!({"type":"doc","content":[{"type":"paragraph"}]}))
+                .unwrap();
             let slice = Slice::new(
                 Fragment::from(vec![crate::dynamic::types::DynamicNode::text("foo")]),
-                0, 0,
+                0,
+                0,
             );
             let result = doc.replace(0..0, &slice);
             assert!(result.is_err());

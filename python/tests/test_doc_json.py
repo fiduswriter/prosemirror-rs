@@ -17,18 +17,20 @@ import sys
 from prosemirror_rs import Editor
 
 # Schema with attributes that have defaults
-SCHEMA = json.dumps({
-    "nodes": {
-        "doc":       {"content": "paragraph+"},
-        "paragraph": {
-            "content": "text*",
-            "group": "block",
-            "attrs": {"align": {"default": "left"}, "indent": {"default": 0}},
+SCHEMA = json.dumps(
+    {
+        "nodes": {
+            "doc": {"content": "paragraph+"},
+            "paragraph": {
+                "content": "text*",
+                "group": "block",
+                "attrs": {"align": {"default": "left"}, "indent": {"default": 0}},
+            },
+            "text": {"group": "inline"},
         },
-        "text": {"group": "inline"},
-    },
-    "marks": {"strong": {"attrs": {"level": {"default": 1}}}, "em": {}},
-})
+        "marks": {"strong": {"attrs": {"level": {"default": 1}}}, "em": {}},
+    }
+)
 
 
 def parse(raw: str) -> dict:
@@ -41,18 +43,18 @@ def test_default_all_attrs_include() -> None:
     doc_json() (no arguments) includes every attribute, even when
     they match the schema default.
     """
-    doc_json_str = json.dumps({
-        "type": "doc",
-        "content": [
-            {
-                "type": "paragraph",
-                "attrs": {"align": "left", "indent": 0},
-                "content": [
-                    {"type": "text", "text": "hello"}
-                ],
-            }
-        ],
-    })
+    doc_json_str = json.dumps(
+        {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "attrs": {"align": "left", "indent": 0},
+                    "content": [{"type": "text", "text": "hello"}],
+                }
+            ],
+        }
+    )
     editor = Editor(SCHEMA, doc_json_str)
 
     raw = editor.doc_json()
@@ -71,19 +73,24 @@ def test_mini_omits_default_attrs() -> None:
     doc_json(True) omits attributes whose value matches the schema
     default from both nodes and marks.
     """
-    doc_json_str = json.dumps({
-        "type": "doc",
-        "content": [
-            {
-                "type": "paragraph",
-                "attrs": {"align": "left", "indent": 0},
-                "content": [
-                    {"type": "text", "text": "hello",
-                     "marks": [{"type": "strong", "attrs": {"level": 1}}]}
-                ],
-            }
-        ],
-    })
+    doc_json_str = json.dumps(
+        {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "attrs": {"align": "left", "indent": 0},
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "hello",
+                            "marks": [{"type": "strong", "attrs": {"level": 1}}],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
     editor = Editor(SCHEMA, doc_json_str)
 
     raw = editor.doc_json(True)
@@ -91,9 +98,7 @@ def test_mini_omits_default_attrs() -> None:
 
     para = obj["content"][0]
     # attrs omitted entirely because both match defaults
-    assert "attrs" not in para, (
-        f"Expected no attrs on paragraph, got {para.get('attrs')!r}"
-    )
+    assert "attrs" not in para, f"Expected no attrs on paragraph, got {para.get('attrs')!r}"
 
     # Mark attrs also omitted
     text_node = para["content"][0]
@@ -110,19 +115,24 @@ def test_mini_preserves_non_default_attrs() -> None:
     doc_json(True) preserves attributes whose value differs from the
     schema default.
     """
-    doc_json_str = json.dumps({
-        "type": "doc",
-        "content": [
-            {
-                "type": "paragraph",
-                "attrs": {"align": "right", "indent": 3},
-                "content": [
-                    {"type": "text", "text": "world",
-                     "marks": [{"type": "strong", "attrs": {"level": 2}}]}
-                ],
-            }
-        ],
-    })
+    doc_json_str = json.dumps(
+        {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "attrs": {"align": "right", "indent": 3},
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "world",
+                            "marks": [{"type": "strong", "attrs": {"level": 2}}],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
     editor = Editor(SCHEMA, doc_json_str)
 
     raw = editor.doc_json(True)
@@ -145,19 +155,19 @@ def test_mini_mixed_attrs() -> None:
     doc_json(True) with a mix of default and non-default attributes:
     only the non-default attributes appear.
     """
-    doc_json_str = json.dumps({
-        "type": "doc",
-        "content": [
-            {
-                "type": "paragraph",
-                # align is default ("left"), indent is non-default (2)
-                "attrs": {"align": "left", "indent": 2},
-                "content": [
-                    {"type": "text", "text": "mixed"}
-                ],
-            }
-        ],
-    })
+    doc_json_str = json.dumps(
+        {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    # align is default ("left"), indent is non-default (2)
+                    "attrs": {"align": "left", "indent": 2},
+                    "content": [{"type": "text", "text": "mixed"}],
+                }
+            ],
+        }
+    )
     editor = Editor(SCHEMA, doc_json_str)
 
     raw = editor.doc_json(True)
@@ -175,39 +185,38 @@ def test_backwards_compatibility() -> None:
     doc_json() without arguments should produce the same output as
     doc_json(False).
     """
-    doc_json_str = json.dumps({
-        "type": "doc",
-        "content": [
-            {
-                "type": "paragraph",
-                "attrs": {"align": "right", "indent": 0},
-                "content": [
-                    {"type": "text", "text": "compat"}
-                ],
-            }
-        ],
-    })
+    doc_json_str = json.dumps(
+        {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "attrs": {"align": "right", "indent": 0},
+                    "content": [{"type": "text", "text": "compat"}],
+                }
+            ],
+        }
+    )
     editor = Editor(SCHEMA, doc_json_str)
 
-    raw_default  = editor.doc_json()
+    raw_default = editor.doc_json()
     raw_explicit = editor.doc_json(False)
 
     assert raw_default == raw_explicit, (
-        f"doc_json() != doc_json(False)\n"
-        f"  default: {raw_default}\n"
-        f"  explicit: {raw_explicit}"
+        f"doc_json() != doc_json(False)\n  default: {raw_default}\n  explicit: {raw_explicit}"
     )
 
 
 # ── runner ────────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     tests = [
-        ("all attrs included (default)",           test_default_all_attrs_include),
-        ("mini omits default attrs",               test_mini_omits_default_attrs),
-        ("mini preserves non-default attrs",       test_mini_preserves_non_default_attrs),
-        ("mini mixed attrs",                       test_mini_mixed_attrs),
-        ("backwards compat: doc_json() == False",  test_backwards_compatibility),
+        ("all attrs included (default)", test_default_all_attrs_include),
+        ("mini omits default attrs", test_mini_omits_default_attrs),
+        ("mini preserves non-default attrs", test_mini_preserves_non_default_attrs),
+        ("mini mixed attrs", test_mini_mixed_attrs),
+        ("backwards compat: doc_json() == False", test_backwards_compatibility),
     ]
 
     failures = 0
@@ -219,6 +228,7 @@ def main() -> int:
             print(f"  FAIL  {label}")
             # Print the traceback manually to stay self-contained
             import traceback
+
             traceback.print_exc()
             failures += 1
 

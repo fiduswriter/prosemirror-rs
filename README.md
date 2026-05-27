@@ -330,6 +330,8 @@ git push origin v0.3.2
 This crate was originally created by **Daniel Seiler**
 ([Xiphoseer](https://github.com/Xiphoseer), <me@dseiler.eu>), who designed and
 implemented the document model, transform pipeline, and runtime schema system.
+**Mustafa J** (<mustafa.0x@gmail.com>) has made substantial contributions to the
+core Rust implementation.
 The project is now maintained by
 **Johannes Wilm** ([FidusWriter](https://github.com/fiduswriter),
 <johannes@fiduswriter.org>).
@@ -338,10 +340,18 @@ The ProseMirror data model and step format are the work of
 **Marijn Haverbeke** and the ProseMirror contributors. See
 [prosemirror.net](https://prosemirror.net) for the upstream project.
 
+The Python test suite used for cross-implementation validation is taken from
+[`prosemirror-py`](https://github.com/fellowapp/prosemirror-py), a Python port
+of ProseMirror originally created by **Shen Li** and maintained by
+**Samuel Cormier-Iijima**, **Patrick Gingras**, and others at
+[Fellow Insights Inc.](https://github.com/fellowapp)
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
 Copyright 2026 Johannes Wilm  
+Copyright 2025–2026 Mustafa J  
 Copyright 2020 Daniel Seiler  
+Copyright 2019 Fellow Insights Inc. (prosemirror-py Python port)  
 Copyright 2015–2026 Marijn Haverbeke and others

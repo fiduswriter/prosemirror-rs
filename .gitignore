@@ -2,5 +2,11 @@
 Cargo.lock
 .direnv/
 .envrc
+.envrc.local
 node_modules/
 node/prosemirror-rs.*.node
+__pycache__/
+*.pyc
+*.so
+test_clone
+plans/

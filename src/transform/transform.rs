@@ -122,7 +122,10 @@ impl<S: Schema> Transform<S> {
                             for m in marks {
                                 if !m.is_in_set(&new_set) {
                                     removed.push(Step::RemoveMark(RemoveMarkStep {
-                                        span: crate::transform::Span { from: start, to: end },
+                                        span: crate::transform::Span {
+                                            from: start,
+                                            to: end,
+                                        },
                                         mark: m.clone(),
                                     }));
                                 }
@@ -130,7 +133,10 @@ impl<S: Schema> Transform<S> {
                         }
 
                         added.push(Step::AddMark(AddMarkStep {
-                            span: crate::transform::Span { from: start, to: end },
+                            span: crate::transform::Span {
+                                from: start,
+                                to: end,
+                            },
                             mark: mark.clone(),
                         }));
                     }
@@ -150,12 +156,7 @@ impl<S: Schema> Transform<S> {
     }
 
     /// Remove mark(s) from the inline content in the given range.
-    pub fn remove_mark(
-        &mut self,
-        from: usize,
-        to: usize,
-        mark: Option<S::Mark>,
-    ) -> &mut Self {
+    pub fn remove_mark(&mut self, from: usize, to: usize, mark: Option<S::Mark>) -> &mut Self {
         // Simplified: remove all matching marks
         if let Some(mark) = mark {
             let step = Step::RemoveMark(RemoveMarkStep {
@@ -188,12 +189,7 @@ impl<S: Schema> Transform<S> {
     }
 
     /// Replace range with specific content.
-    pub fn replace_with(
-        &mut self,
-        from: usize,
-        to: usize,
-        content: Fragment<S>,
-    ) -> &mut Self {
+    pub fn replace_with(&mut self, from: usize, to: usize, content: Fragment<S>) -> &mut Self {
         self.replace(from, Some(to), Some(Slice::new(content, 0, 0)))
     }
 
@@ -272,11 +268,7 @@ impl<S: Schema> Transform<S> {
     }
 
     /// Set a document attribute.
-    pub fn set_doc_attribute(
-        &mut self,
-        attr: &str,
-        value: serde_json::Value,
-    ) -> &mut Self {
+    pub fn set_doc_attribute(&mut self, attr: &str, value: serde_json::Value) -> &mut Self {
         let _ = self.maybe_step(Step::DocAttr(super::DocAttrStep {
             attr: attr.to_string(),
             value,
@@ -328,7 +320,10 @@ impl<S: Schema> Transform<S> {
         let combined = before.append(after);
         let insert_offset = combined.size() - open_start;
         let _ = self.maybe_step(Step::ReplaceAround(ReplaceAroundStep {
-            span: crate::transform::Span { from: start, to: end },
+            span: crate::transform::Span {
+                from: start,
+                to: end,
+            },
             gap_from: gap_start,
             gap_to: gap_end,
             slice: Slice::new(combined, open_start, open_end),
@@ -339,7 +334,11 @@ impl<S: Schema> Transform<S> {
     }
 
     /// Wrap content in node(s).
-    pub fn wrap(&mut self, range: &NodeRange<S>, wrappers: &[(S::NodeType, Option<MarkSet<S>>)]) -> &mut Self {
+    pub fn wrap(
+        &mut self,
+        range: &NodeRange<S>,
+        wrappers: &[(S::NodeType, Option<MarkSet<S>>)],
+    ) -> &mut Self {
         let mut content = Fragment::new();
         for i in (0..wrappers.len()).rev() {
             if content.size() > 0 {
@@ -348,12 +347,17 @@ impl<S: Schema> Transform<S> {
                     _ => return self,
                 }
             }
-            content = Fragment::from(vec![wrappers[i].0.create_node(Some(&content), wrappers[i].1.as_ref())]);
+            content = Fragment::from(vec![wrappers[i]
+                .0
+                .create_node(Some(&content), wrappers[i].1.as_ref())]);
         }
         let start = range.start();
         let end = range.end();
         let _ = self.maybe_step(Step::ReplaceAround(ReplaceAroundStep {
-            span: crate::transform::Span { from: start, to: end },
+            span: crate::transform::Span {
+                from: start,
+                to: end,
+            },
             gap_from: start,
             gap_to: end,
             slice: Slice::new(content, 0, 0),
@@ -459,12 +463,7 @@ impl<S: Schema> Transform<S> {
     }
 
     /// Change the type of textblocks in the given range.
-    pub fn set_block_type(
-        &mut self,
-        from: usize,
-        to: usize,
-        node_type: S::NodeType,
-    ) -> &mut Self {
+    pub fn set_block_type(&mut self, from: usize, to: usize, node_type: S::NodeType) -> &mut Self {
         let map_from = self.steps.len();
         // Walk through nodes and change block types
         if let Some(content) = self.doc.content() {
@@ -491,7 +490,11 @@ impl<S: Schema> Transform<S> {
                     },
                     gap_from: pos + 1,
                     gap_to: mapped_end - 1,
-                    slice: Slice::new(Fragment::from(vec![node_type.create_node(None, None)]), 0, 0),
+                    slice: Slice::new(
+                        Fragment::from(vec![node_type.create_node(None, None)]),
+                        0,
+                        0,
+                    ),
                     insert: 1,
                     structure: true,
                 }));
@@ -515,7 +518,11 @@ impl<S: Schema> Transform<S> {
             let type_ = node_type.unwrap_or_else(|| node.r#type());
             let new_node = type_.create_node(None, marks.as_ref());
             if node.is_leaf() {
-                return self.replace_with(pos, pos + node.node_size(), Fragment::from(vec![new_node]));
+                return self.replace_with(
+                    pos,
+                    pos + node.node_size(),
+                    Fragment::from(vec![new_node]),
+                );
             }
             let _ = self.maybe_step(Step::ReplaceAround(ReplaceAroundStep {
                 span: crate::transform::Span {

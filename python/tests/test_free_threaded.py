@@ -30,33 +30,44 @@ from prosemirror_rs import Editor
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-SCHEMA = json.dumps({
-    "nodes": {
-        "doc":       {"content": "paragraph+"},
-        "paragraph": {"content": "text*", "group": "block"},
-        "text":      {"group": "inline"},
-    },
-    "marks": {"strong": {}, "em": {}},
-})
+SCHEMA = json.dumps(
+    {
+        "nodes": {
+            "doc": {"content": "paragraph+"},
+            "paragraph": {"content": "text*", "group": "block"},
+            "text": {"group": "inline"},
+        },
+        "marks": {"strong": {}, "em": {}},
+    }
+)
 
-DOC = json.dumps({
-    "type": "doc",
-    "content": [{"type": "paragraph", "content": [
-        {"type": "text", "text": "hello"},
-    ]}],
-})
+DOC = json.dumps(
+    {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {"type": "text", "text": "hello"},
+                ],
+            }
+        ],
+    }
+)
 
 # Insert "x" between position 2 and 2 (inside the first paragraph).
 # Stays valid across repeated inserts because the paragraph keeps growing.
-STEP = json.dumps({
-    "stepType": "replace",
-    "from": 2,
-    "to": 2,
-    "slice": {"content": [{"type": "text", "text": "x"}]},
-})
+STEP = json.dumps(
+    {
+        "stepType": "replace",
+        "from": 2,
+        "to": 2,
+        "slice": {"content": [{"type": "text", "text": "x"}]},
+    }
+)
 
-N_THREADS = 20   # 10 readers + 10 writers
-N_OPS     = 20   # operations per thread
+N_THREADS = 20  # 10 readers + 10 writers
+N_OPS = 20  # operations per thread
 
 
 def _check_gil():
@@ -77,10 +88,11 @@ def _check_gil():
 
 # ── test ──────────────────────────────────────────────────────────────────────
 
+
 def test_concurrent_access():
-    editor   = Editor(SCHEMA, DOC)
-    barrier  = threading.Barrier(N_THREADS)
-    errors   = []
+    editor = Editor(SCHEMA, DOC)
+    barrier = threading.Barrier(N_THREADS)
+    errors = []
     err_lock = threading.Lock()
 
     def read_worker():
@@ -96,9 +108,7 @@ def test_concurrent_access():
                 try:
                     raw = editor.doc_json()
                     doc = json.loads(raw)
-                    assert doc["type"] == "doc", (
-                        f"root type corrupted: got {doc['type']!r}"
-                    )
+                    assert doc["type"] == "doc", f"root type corrupted: got {doc['type']!r}"
                 except RuntimeError:
                     # Borrow contention — expected under free-threaded Python.
                     pass
@@ -127,10 +137,9 @@ def test_concurrent_access():
             with err_lock:
                 errors.append(exc)
 
-    threads = (
-        [threading.Thread(target=read_worker,  name=f"reader-{i}") for i in range(N_THREADS // 2)]
-        + [threading.Thread(target=write_worker, name=f"writer-{i}") for i in range(N_THREADS // 2)]
-    )
+    threads = [
+        threading.Thread(target=read_worker, name=f"reader-{i}") for i in range(N_THREADS // 2)
+    ] + [threading.Thread(target=write_worker, name=f"writer-{i}") for i in range(N_THREADS // 2)]
 
     for t in threads:
         t.start()
@@ -145,7 +154,7 @@ def test_concurrent_access():
 
     # Final document must still be well-formed.
     final_raw = editor.doc_json()
-    final     = json.loads(final_raw)
+    final = json.loads(final_raw)
     assert final["type"] == "doc", "final document root type corrupted"
     assert isinstance(final["content"], list), "final document content missing"
 

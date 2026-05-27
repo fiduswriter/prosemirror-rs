@@ -5,7 +5,7 @@
 //! document using the Rust API and then assert that the resulting document
 //! equals the `expected` field captured from the reference JS implementation.
 
-use prosemirror::dynamic::{DynamicSchema, DynamicNode};
+use prosemirror::dynamic::{DynamicNode, DynamicSchema};
 use prosemirror::model::{Fragment, Slice};
 use prosemirror::transform::Transform;
 
@@ -36,7 +36,11 @@ fn parity_schema() -> DynamicSchema {
 
 fn fixture_path(name: &str) -> std::path::PathBuf {
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest.join("tests").join("spec").join("expected").join(format!("{}.json", name))
+    manifest
+        .join("tests")
+        .join("spec")
+        .join("expected")
+        .join(format!("{}.json", name))
 }
 
 fn apply_operation(
@@ -63,14 +67,18 @@ fn apply_operation(
             let from = case["from"].as_u64().unwrap() as usize;
             let to = case["to"].as_u64().unwrap() as usize;
             let mark_name = case["mark"].as_str().unwrap();
-            let mark = schema.mark_from_json(&serde_json::json!({"type": mark_name})).unwrap();
+            let mark = schema
+                .mark_from_json(&serde_json::json!({"type": mark_name}))
+                .unwrap();
             tr.add_mark(from, to, mark);
         }
         "removeMark" => {
             let from = case["from"].as_u64().unwrap() as usize;
             let to = case["to"].as_u64().unwrap() as usize;
             let mark_name = case["mark"].as_str().unwrap();
-            let mark = schema.mark_from_json(&serde_json::json!({"type": mark_name})).unwrap();
+            let mark = schema
+                .mark_from_json(&serde_json::json!({"type": mark_name}))
+                .unwrap();
             tr.remove_mark(from, to, Some(mark));
         }
         "split" => {

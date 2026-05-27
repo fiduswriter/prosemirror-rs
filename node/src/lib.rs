@@ -77,13 +77,18 @@ impl Editor {
     pub fn new(schema_json: String, doc_json: String) -> napi::Result<Self> {
         let schema = get_or_create_schema(&schema_json)?;
 
-        let doc_val: serde_json::Value = serde_json::from_str(&doc_json)
-            .map_err(|e| napi::Error::new(Status::InvalidArg, format!("Invalid document JSON: {e}")))?;
+        let doc_val: serde_json::Value = serde_json::from_str(&doc_json).map_err(|e| {
+            napi::Error::new(Status::InvalidArg, format!("Invalid document JSON: {e}"))
+        })?;
         let doc = schema
             .node_from_json(&doc_val)
             .map_err(|e| napi::Error::new(Status::InvalidArg, format!("Invalid document: {e}")))?;
 
-        Ok(Editor { schema, doc, version: 0 })
+        Ok(Editor {
+            schema,
+            doc,
+            version: 0,
+        })
     }
 
     /// Apply a single step to the document.
@@ -98,8 +103,9 @@ impl Editor {
             let schema = &self.schema;
             let doc = &self.doc;
             schema.with_types(|| -> napi::Result<Option<DynamicNode>> {
-                let step: Step<Dyn> = serde_json::from_str(&step_json)
-                    .map_err(|e| napi::Error::new(Status::InvalidArg, format!("Invalid step JSON: {e}")))?;
+                let step: Step<Dyn> = serde_json::from_str(&step_json).map_err(|e| {
+                    napi::Error::new(Status::InvalidArg, format!("Invalid step JSON: {e}"))
+                })?;
                 Ok(step.apply(doc).ok())
             })
         }?;
@@ -137,8 +143,9 @@ impl Editor {
         let steps: Vec<Step<Dyn>> = {
             let schema = &self.schema;
             schema.with_types(|| {
-                serde_json::from_str(&steps_json)
-                    .map_err(|e| napi::Error::new(Status::InvalidArg, format!("Invalid steps JSON: {e}")))
+                serde_json::from_str(&steps_json).map_err(|e| {
+                    napi::Error::new(Status::InvalidArg, format!("Invalid steps JSON: {e}"))
+                })
             })?
         };
 
@@ -206,8 +213,9 @@ impl Editor {
                 steps
                     .iter()
                     .map(|s| {
-                        serde_json::from_str::<Step<Dyn>>(s)
-                            .map_err(|e| napi::Error::new(Status::InvalidArg, format!("Invalid step JSON: {e}")))
+                        serde_json::from_str::<Step<Dyn>>(s).map_err(|e| {
+                            napi::Error::new(Status::InvalidArg, format!("Invalid step JSON: {e}"))
+                        })
                     })
                     .collect::<napi::Result<Vec<_>>>()
             })?
@@ -250,8 +258,9 @@ impl Editor {
     ///   the schema.
     #[napi]
     pub fn reset(&mut self, doc_json: String) -> napi::Result<()> {
-        let doc_val: serde_json::Value = serde_json::from_str(&doc_json)
-            .map_err(|e| napi::Error::new(Status::InvalidArg, format!("Invalid document JSON: {e}")))?;
+        let doc_val: serde_json::Value = serde_json::from_str(&doc_json).map_err(|e| {
+            napi::Error::new(Status::InvalidArg, format!("Invalid document JSON: {e}"))
+        })?;
         let doc = self
             .schema
             .node_from_json(&doc_val)
@@ -275,9 +284,12 @@ impl Editor {
     /// @returns The document as a compact JSON string.
     #[napi]
     pub fn doc_json(&self, skip_defaults: Option<bool>) -> napi::Result<String> {
-        let val = self.schema.with_types(|| self.doc.to_json(skip_defaults.unwrap_or(false)));
-        serde_json::to_string(&val)
-            .map_err(|e| napi::Error::new(Status::GenericFailure, format!("Serialization error: {e}")))
+        let val = self
+            .schema
+            .with_types(|| self.doc.to_json(skip_defaults.unwrap_or(false)));
+        serde_json::to_string(&val).map_err(|e| {
+            napi::Error::new(Status::GenericFailure, format!("Serialization error: {e}"))
+        })
     }
 
     /// Number of steps successfully applied since construction (or last `reset()`).

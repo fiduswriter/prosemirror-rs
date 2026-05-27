@@ -21,7 +21,9 @@ pub struct MarkSet<S: Schema> {
 impl<S: Schema> MarkSet<S> {
     /// Create a new empty MarkSet
     pub fn new() -> Self {
-        MarkSet { content: Vec::new() }
+        MarkSet {
+            content: Vec::new(),
+        }
     }
 
     /// Check whether the set contains this exact mark

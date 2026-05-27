@@ -668,7 +668,10 @@ mod tests {
     #[test]
     fn test_parse_plus() {
         let mut groups = HashMap::new();
-        groups.insert("block".to_string(), vec!["paragraph".to_string(), "heading".to_string()]);
+        groups.insert(
+            "block".to_string(),
+            vec!["paragraph".to_string(), "heading".to_string()],
+        );
         let expr = parse_content_expr("block+", &groups).unwrap();
         assert!(!expr.valid_end(0));
         assert!(expr.match_type(0, "paragraph").is_some());

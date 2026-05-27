@@ -1,10 +1,8 @@
 //! Dynamic runtime types for nodes, marks, and their type descriptors.
 
 use crate::dynamic::content_expr::ContentExpr;
-use crate::model::{
-    ContentMatch, Fragment, Mark, MarkSet, Node, NodeType, Schema, Text, TextNode,
-};
 use crate::model::MarkType;
+use crate::model::{ContentMatch, Fragment, Mark, MarkSet, Node, NodeType, Schema, Text, TextNode};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -86,20 +84,30 @@ pub struct DynamicNodeType {
 }
 
 impl PartialEq for DynamicNodeType {
-    fn eq(&self, other: &Self) -> bool { self.idx == other.idx }
+    fn eq(&self, other: &Self) -> bool {
+        self.idx == other.idx
+    }
 }
 impl Eq for DynamicNodeType {}
 impl PartialOrd for DynamicNodeType {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) }
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 impl Ord for DynamicNodeType {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering { self.idx.cmp(&other.idx) }
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.idx.cmp(&other.idx)
+    }
 }
 impl Hash for DynamicNodeType {
-    fn hash<H: Hasher>(&self, state: &mut H) { self.idx.hash(state); }
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.idx.hash(state);
+    }
 }
 impl fmt::Display for DynamicNodeType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "NodeType({})", self.idx) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "NodeType({})", self.idx)
+    }
 }
 
 /// A lightweight, Copy handle to a dynamic mark type.
@@ -110,17 +118,25 @@ pub struct DynamicMarkType {
 }
 
 impl PartialEq for DynamicMarkType {
-    fn eq(&self, other: &Self) -> bool { self.idx == other.idx }
+    fn eq(&self, other: &Self) -> bool {
+        self.idx == other.idx
+    }
 }
 impl Eq for DynamicMarkType {}
 impl PartialOrd for DynamicMarkType {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) }
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 impl Ord for DynamicMarkType {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering { self.idx.cmp(&other.idx) }
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.idx.cmp(&other.idx)
+    }
 }
 impl Hash for DynamicMarkType {
-    fn hash<H: Hasher>(&self, state: &mut H) { self.idx.hash(state); }
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.idx.hash(state);
+    }
 }
 impl MarkType for DynamicMarkType {}
 
@@ -134,15 +150,24 @@ pub struct DynamicContentMatch {
 }
 
 impl PartialEq for DynamicContentMatch {
-    fn eq(&self, other: &Self) -> bool { self.expr_idx == other.expr_idx && self.state == other.state }
+    fn eq(&self, other: &Self) -> bool {
+        self.expr_idx == other.expr_idx && self.state == other.state
+    }
 }
 impl Eq for DynamicContentMatch {}
 
 impl ContentMatch<Dyn> for DynamicContentMatch {
-    fn match_fragment_range<R: RangeBounds<usize>>(self, fragment: &Fragment<Dyn>, range: R) -> Option<Self> {
+    fn match_fragment_range<R: RangeBounds<usize>>(
+        self,
+        fragment: &Fragment<Dyn>,
+        range: R,
+    ) -> Option<Self> {
         use crate::model::util;
         let start = util::from(&range);
         let end = util::to(&range, fragment.child_count());
+        if start > end || end > fragment.child_count() {
+            return None;
+        }
         with_types(|store| {
             let expr = &store.content_exprs[self.expr_idx];
             let mut state = self.state;
@@ -150,12 +175,17 @@ impl ContentMatch<Dyn> for DynamicContentMatch {
                 let name = &store.node_types[child.r#type().idx].name;
                 state = expr.match_type(state, name)?;
             }
-            Some(DynamicContentMatch { expr_idx: self.expr_idx, state })
-        }).flatten()
+            Some(DynamicContentMatch {
+                expr_idx: self.expr_idx,
+                state,
+            })
+        })
+        .flatten()
     }
 
     fn valid_end(self) -> bool {
-        with_types(|store| store.content_exprs[self.expr_idx].valid_end(self.state)).unwrap_or(false)
+        with_types(|store| store.content_exprs[self.expr_idx].valid_end(self.state))
+            .unwrap_or(false)
     }
 
     fn match_type(self, r#type: DynamicNodeType) -> Option<Self> {
@@ -163,11 +193,20 @@ impl ContentMatch<Dyn> for DynamicContentMatch {
             let expr = &store.content_exprs[self.expr_idx];
             let name = &store.node_types[r#type.idx].name;
             let next = expr.match_type(self.state, name)?;
-            Some(DynamicContentMatch { expr_idx: self.expr_idx, state: next })
-        }).flatten()
+            Some(DynamicContentMatch {
+                expr_idx: self.expr_idx,
+                state: next,
+            })
+        })
+        .flatten()
     }
 
-    fn fill_before(self, after: &Fragment<Dyn>, to_end: bool, start_index: usize) -> Option<Fragment<Dyn>> {
+    fn fill_before(
+        self,
+        after: &Fragment<Dyn>,
+        to_end: bool,
+        start_index: usize,
+    ) -> Option<Fragment<Dyn>> {
         with_types(|store| {
             let expr = &store.content_exprs[self.expr_idx];
             let mut state = self.state;
@@ -180,16 +219,20 @@ impl ContentMatch<Dyn> for DynamicContentMatch {
             let mut result = Vec::new();
             fill_before_impl(expr, state, after, start_index, to_end, &mut result, store)?;
             Some(Fragment::from(result))
-        }).flatten()
+        })
+        .flatten()
     }
 
     fn find_wrapping(self, target: DynamicNodeType) -> Option<Vec<DynamicNodeType>> {
         with_types(|store| {
             let expr = &store.content_exprs[self.expr_idx];
             let name = &store.node_types[target.idx].name;
-            if expr.match_type(self.state, name).is_some() { return Some(Vec::new()); }
+            if expr.match_type(self.state, name).is_some() {
+                return Some(Vec::new());
+            }
             None
-        }).flatten()
+        })
+        .flatten()
     }
 
     fn inline_content(self) -> bool {
@@ -197,11 +240,14 @@ impl ContentMatch<Dyn> for DynamicContentMatch {
             let expr = &store.content_exprs[self.expr_idx];
             for i in 0..expr.edge_count(self.state) {
                 if let Some((name, _)) = expr.edge(self.state, i) {
-                    if name == "text" || name == "hard_break" || name == "image" { return true; }
+                    if name == "text" || name == "hard_break" || name == "image" {
+                        return true;
+                    }
                 }
             }
             false
-        }).unwrap_or(false)
+        })
+        .unwrap_or(false)
     }
 
     fn edge_count(self) -> usize {
@@ -214,28 +260,42 @@ impl ContentMatch<Dyn> for DynamicContentMatch {
             let (name, next_state) = expr.edge(self.state, n)?;
             for (i, nt) in store.node_types.iter().enumerate() {
                 if nt.name == name {
-                    return Some((DynamicNodeType { idx: i }, DynamicContentMatch {
-                        expr_idx: self.expr_idx, state: next_state,
-                    }));
+                    return Some((
+                        DynamicNodeType { idx: i },
+                        DynamicContentMatch {
+                            expr_idx: self.expr_idx,
+                            state: next_state,
+                        },
+                    ));
                 }
             }
             None
-        }).flatten()
+        })
+        .flatten()
     }
 }
 
 fn fill_before_impl(
-    expr: &ContentExpr, state: usize, after: &Fragment<Dyn>, index: usize, to_end: bool,
-    result: &mut Vec<DynamicNode>, store: &DynTypeStore,
+    expr: &ContentExpr,
+    state: usize,
+    after: &Fragment<Dyn>,
+    index: usize,
+    to_end: bool,
+    result: &mut Vec<DynamicNode>,
+    store: &DynTypeStore,
 ) -> Option<()> {
-    if to_end && expr.valid_end(state) { return Some(()); }
+    if to_end && expr.valid_end(state) {
+        return Some(());
+    }
     if let Some(child) = after.maybe_child(index) {
         let name = &store.node_types[child.r#type().idx].name;
         let next = expr.match_type(state, name)?;
         result.push(child.clone());
         return fill_before_impl(expr, next, after, index + 1, to_end, result, store);
     }
-    if !to_end && expr.valid_end(state) { return Some(()); }
+    if !to_end && expr.valid_end(state) {
+        return Some(());
+    }
     None
 }
 
@@ -335,8 +395,13 @@ impl DynamicNode {
             let map = self.attrs.as_object().unwrap();
             // Query the schema for the default attribute values of this node type
             let default_attrs = with_types(|store| {
-                    store.node_types.get(self.type_idx).map(|nt| nt.attrs.clone())
-                }).flatten().unwrap_or_default();
+                store
+                    .node_types
+                    .get(self.type_idx)
+                    .map(|nt| nt.attrs.clone())
+            })
+            .flatten()
+            .unwrap_or_default();
 
             let mut non_default = serde_json::Map::new();
             for (k, v) in map {
@@ -366,9 +431,10 @@ impl DynamicNode {
         // Content
         match &self.inner {
             DynNodeInner::Text(tn) => {
-                obj.as_object_mut()
-                    .unwrap()
-                    .insert("text".to_string(), serde_json::Value::String(tn.text.as_str().to_string()));
+                obj.as_object_mut().unwrap().insert(
+                    "text".to_string(),
+                    serde_json::Value::String(tn.text.as_str().to_string()),
+                );
             }
             DynNodeInner::Element { content } => {
                 if content.child_count() > 0 {
@@ -385,11 +451,8 @@ impl DynamicNode {
         }
 
         // Marks
-        let mini_marks: Vec<serde_json::Value> = self
-            .marks
-            .iter()
-            .map(|m| m.to_mini_json())
-            .collect();
+        let mini_marks: Vec<serde_json::Value> =
+            self.marks.iter().map(|m| m.to_mini_json()).collect();
         if !mini_marks.is_empty() {
             obj.as_object_mut()
                 .unwrap()
@@ -406,7 +469,9 @@ impl PartialEq for DynamicNode {
             && self.attrs == other.attrs
             && self.marks == other.marks
             && match (&self.inner, &other.inner) {
-                (DynNodeInner::Element { content: a }, DynNodeInner::Element { content: b }) => a == b,
+                (DynNodeInner::Element { content: a }, DynNodeInner::Element { content: b }) => {
+                    a == b
+                }
                 (DynNodeInner::Text(a), DynNodeInner::Text(b)) => a.text == b.text,
                 _ => false,
             }
@@ -474,10 +539,14 @@ impl<'de> Deserialize<'de> for DynamicNode {
         let helper = DynamicNodeHelper::deserialize(deserializer)?;
         let type_idx = with_types(|store| {
             for (i, nt) in store.node_types.iter().enumerate() {
-                if nt.name == helper.type_name { return Some(i); }
+                if nt.name == helper.type_name {
+                    return Some(i);
+                }
             }
             None
-        }).flatten().unwrap_or(0);
+        })
+        .flatten()
+        .unwrap_or(0);
 
         let marks_vec = helper.marks;
         let mut marks_set = MarkSet::new();
@@ -492,7 +561,10 @@ impl<'de> Deserialize<'de> for DynamicNode {
                 type_name: helper.type_name,
                 attrs: helper.attrs,
                 marks: marks_set.clone(),
-                inner: DynNodeInner::Text(TextNode { text: text_obj, marks: marks_set }),
+                inner: DynNodeInner::Text(TextNode {
+                    text: text_obj,
+                    marks: marks_set,
+                }),
             })
         } else {
             let frag = Fragment::from(helper.content);
@@ -565,8 +637,14 @@ impl DynamicMark {
 
         if let serde_json::Value::Object(map) = &self.attrs {
             let default_attrs = with_types(|store| {
-                    store.mark_types.iter().find(|mt| mt.name == self.type_name).map(|mt| mt.attrs.clone())
-                }).flatten().unwrap_or_default();
+                store
+                    .mark_types
+                    .iter()
+                    .find(|mt| mt.name == self.type_name)
+                    .map(|mt| mt.attrs.clone())
+            })
+            .flatten()
+            .unwrap_or_default();
 
             let mut non_default = serde_json::Map::new();
             for (k, v) in map {
@@ -590,7 +668,9 @@ impl DynamicMark {
 }
 
 impl PartialEq for DynamicMark {
-    fn eq(&self, other: &Self) -> bool { self.type_name == other.type_name && self.attrs == other.attrs }
+    fn eq(&self, other: &Self) -> bool {
+        self.type_name == other.type_name && self.attrs == other.attrs
+    }
 }
 impl Eq for DynamicMark {}
 impl Hash for DynamicMark {
@@ -605,7 +685,9 @@ impl Hash for DynamicMark {
 // ---------------------------------------------------------------------------
 
 impl NodeType<Dyn> for DynamicNodeType {
-    fn compatible_content(self, other: Self) -> bool { self.idx == other.idx }
+    fn compatible_content(self, other: Self) -> bool {
+        self.idx == other.idx
+    }
 
     fn valid_content(self, fragment: &Fragment<Dyn>) -> bool {
         with_types(|store| {
@@ -618,7 +700,8 @@ impl NodeType<Dyn> for DynamicNodeType {
                 }
             }
             expr.valid_end(state)
-        }).unwrap_or(false)
+        })
+        .unwrap_or(false)
     }
 
     fn allows_mark_type(self, mark_type: DynamicMarkType) -> bool {
@@ -628,13 +711,19 @@ impl NodeType<Dyn> for DynamicNodeType {
                 Some(allowed) => allowed.contains(&store.mark_types[mark_type.idx].name),
                 None => true,
             }
-        }).unwrap_or(true)
+        })
+        .unwrap_or(true)
     }
 
     fn content_match(self) -> DynamicContentMatch {
         with_types(|store| DynamicContentMatch {
-            expr_idx: store.node_types[self.idx].content_expr_idx, state: 0,
-        }).unwrap_or(DynamicContentMatch { expr_idx: 0, state: 0 })
+            expr_idx: store.node_types[self.idx].content_expr_idx,
+            state: 0,
+        })
+        .unwrap_or(DynamicContentMatch {
+            expr_idx: 0,
+            state: 0,
+        })
     }
 
     fn allow_marks(self, marks: &MarkSet<Dyn>) -> bool {
@@ -643,13 +732,16 @@ impl NodeType<Dyn> for DynamicNodeType {
             match &nt.allowed_marks {
                 Some(allowed) => {
                     for mark in marks {
-                        if !allowed.contains(&store.mark_types[mark.r#type().idx].name) { return false; }
+                        if !allowed.contains(&store.mark_types[mark.r#type().idx].name) {
+                            return false;
+                        }
                     }
                     true
                 }
                 None => true,
             }
-        }).unwrap_or(true)
+        })
+        .unwrap_or(true)
     }
 
     fn is_block(self) -> bool {
@@ -683,18 +775,43 @@ impl NodeType<Dyn> for DynamicNodeType {
         with_types(|store| store.node_types[self.idx].has_inline_content).unwrap_or(false)
     }
 
-    fn create_node(self, content: Option<&Fragment<Dyn>>, marks: Option<&MarkSet<Dyn>>) -> DynamicNode {
+    fn create_node(
+        self,
+        content: Option<&Fragment<Dyn>>,
+        marks: Option<&MarkSet<Dyn>>,
+    ) -> DynamicNode {
         let (attrs, name) = with_types(|store| {
             let nt = &store.node_types[self.idx];
-            (serde_json::to_value(&nt.attrs).unwrap_or_default(), nt.name.clone())
-        }).unwrap_or_default();
+            (
+                serde_json::to_value(&nt.attrs).unwrap_or_default(),
+                nt.name.clone(),
+            )
+        })
+        .unwrap_or_default();
         DynamicNode {
             type_idx: self.idx,
             type_name: name,
             attrs,
             marks: marks.cloned().unwrap_or_default(),
-            inner: DynNodeInner::Element { content: content.cloned().unwrap_or_default() },
+            inner: DynNodeInner::Element {
+                content: content.cloned().unwrap_or_default(),
+            },
         }
+    }
+
+    fn create(
+        self,
+        attrs: serde_json::Value,
+        content: Option<&Fragment<Dyn>>,
+        marks: Option<&MarkSet<Dyn>>,
+    ) -> DynamicNode {
+        let mut node = self.create_node(content, marks);
+        if let serde_json::Value::Object(map) = attrs {
+            for (key, value) in map {
+                node = node.with_attr(&key, value);
+            }
+        }
+        node
     }
 }
 
@@ -706,10 +823,13 @@ impl Mark<Dyn> for DynamicMark {
     fn r#type(&self) -> DynamicMarkType {
         with_types(|store| {
             for (i, mt) in store.mark_types.iter().enumerate() {
-                if mt.name == self.type_name { return DynamicMarkType { idx: i }; }
+                if mt.name == self.type_name {
+                    return DynamicMarkType { idx: i };
+                }
             }
             DynamicMarkType { idx: 0 }
-        }).unwrap_or(DynamicMarkType { idx: 0 })
+        })
+        .unwrap_or(DynamicMarkType { idx: 0 })
     }
 }
 
@@ -719,13 +839,21 @@ impl Mark<Dyn> for DynamicMark {
 
 impl Node<Dyn> for DynamicNode {
     fn text_node(&self) -> Option<&TextNode<Dyn>> {
-        match &self.inner { DynNodeInner::Text(tn) => Some(tn), _ => None }
+        match &self.inner {
+            DynNodeInner::Text(tn) => Some(tn),
+            _ => None,
+        }
     }
 
     fn new_text_node(node: TextNode<Dyn>) -> Self {
         let type_idx = with_types(|store| {
-            store.node_types.iter().position(|nt| nt.name == "text").unwrap_or(0)
-        }).unwrap_or(0);
+            store
+                .node_types
+                .iter()
+                .position(|nt| nt.name == "text")
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
         DynamicNode {
             type_idx,
             type_name: "text".to_string(),
@@ -738,26 +866,39 @@ impl Node<Dyn> for DynamicNode {
     fn text<A: Into<String>>(text: A) -> Self {
         let s = text.into();
         let type_idx = with_types(|store| {
-            store.node_types.iter().position(|nt| nt.name == "text").unwrap_or(0)
-        }).unwrap_or(0);
+            store
+                .node_types
+                .iter()
+                .position(|nt| nt.name == "text")
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
         DynamicNode {
             type_idx,
             type_name: "text".to_string(),
             attrs: serde_json::Value::Null,
             marks: MarkSet::new(),
-            inner: DynNodeInner::Text(TextNode { text: Text::from(s), marks: MarkSet::new() }),
+            inner: DynNodeInner::Text(TextNode {
+                text: Text::from(s),
+                marks: MarkSet::new(),
+            }),
         }
     }
 
     fn content(&self) -> Option<&Fragment<Dyn>> {
-        match &self.inner { DynNodeInner::Element { content } => Some(content), _ => None }
+        match &self.inner {
+            DynNodeInner::Element { content } => Some(content),
+            _ => None,
+        }
     }
 
     fn marks(&self) -> Option<&MarkSet<Dyn>> {
         Some(&self.marks)
     }
 
-    fn r#type(&self) -> DynamicNodeType { DynamicNodeType { idx: self.type_idx } }
+    fn r#type(&self) -> DynamicNodeType {
+        DynamicNodeType { idx: self.type_idx }
+    }
 
     fn is_block(&self) -> bool {
         match &self.inner {
@@ -800,13 +941,17 @@ impl Node<Dyn> for DynamicNode {
                     type_name: self.type_name.clone(),
                     attrs: self.attrs.clone(),
                     marks: self.marks.clone(),
-                    inner: DynNodeInner::Element { content: new_content },
+                    inner: DynNodeInner::Element {
+                        content: new_content,
+                    },
                 }
             }
         }
     }
 
-    fn attrs_json(&self) -> serde_json::Value { self.attrs.clone() }
+    fn attrs_json(&self) -> serde_json::Value {
+        self.attrs.clone()
+    }
 
     fn with_attr(&self, attr: &str, value: serde_json::Value) -> Self {
         let mut new_attrs = match &self.attrs {
@@ -827,7 +972,11 @@ impl Node<Dyn> for DynamicNode {
         match &self.inner {
             DynNodeInner::Text(tn) => tn.text.len_utf16(),
             DynNodeInner::Element { content } => {
-                if self.is_leaf() { 1 } else { content.size() + 2 }
+                if self.is_leaf() {
+                    1
+                } else {
+                    content.size() + 2
+                }
             }
         }
     }
@@ -880,7 +1029,9 @@ impl Node<Dyn> for DynamicNode {
         }
     }
 
-    fn is_text(&self) -> bool { matches!(self.inner, DynNodeInner::Text(_)) }
+    fn is_text(&self) -> bool {
+        matches!(self.inner, DynNodeInner::Text(_))
+    }
     fn is_leaf(&self) -> bool {
         match &self.inner {
             DynNodeInner::Text(_) => true,
@@ -890,12 +1041,11 @@ impl Node<Dyn> for DynamicNode {
                 // the start state.  An empty-but-nullable type (e.g. `text*`)
                 // is NOT a leaf even when it currently contains no children.
                 with_types(|store| {
-                    store.node_types
+                    store
+                        .node_types
                         .get(self.type_idx)
                         .and_then(|t| store.content_exprs.get(t.content_expr_idx))
-                        .map(|expr| {
-                            expr.states.first().is_none_or(|s| s.edges.is_empty())
-                        })
+                        .map(|expr| expr.states.first().is_none_or(|s| s.edges.is_empty()))
                 })
                 .flatten()
                 .unwrap_or(true)
@@ -907,8 +1057,13 @@ impl Node<Dyn> for DynamicNode {
 impl From<TextNode<Dyn>> for DynamicNode {
     fn from(tn: TextNode<Dyn>) -> Self {
         let type_idx = with_types(|store| {
-            store.node_types.iter().position(|nt| nt.name == "text").unwrap_or(0)
-        }).unwrap_or(0);
+            store
+                .node_types
+                .iter()
+                .position(|nt| nt.name == "text")
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
         DynamicNode {
             type_idx,
             type_name: "text".to_string(),

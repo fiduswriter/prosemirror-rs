@@ -192,6 +192,7 @@ def img(src: str = "x.png") -> Node:
 # Test: StepMap / Mapping
 # ---------------------------------------------------------------------------
 
+
 def generate_mapping_tests():
     """Port of prosemirror-transform/test/test-mapping.ts"""
     cases = []
@@ -217,14 +218,16 @@ def generate_mapping_tests():
             mapped = mapping.map(from_pos, bias)
             inv = mapping.invert()
             inv_mapped = inv.map(mapped, bias)
-            results.append({
-                "from": from_pos,
-                "bias": bias,
-                "to": mapped,
-                "expected_to": expected_to,
-                "lossy": lossy,
-                "inverse_to": inv_mapped,
-            })
+            results.append(
+                {
+                    "from": from_pos,
+                    "bias": bias,
+                    "to": mapped,
+                    "expected_to": expected_to,
+                    "lossy": lossy,
+                    "inverse_to": inv_mapped,
+                }
+            )
         cases.append({"label": label, "results": results})
 
     def test_del(label, specs, pos, side, expected_flags):
@@ -239,27 +242,50 @@ def generate_mapping_tests():
             found += "a"
         if r.deleted_across:
             found += "x"
-        cases.append({
-            "label": label,
-            "pos": pos,
-            "side": side,
-            "flags": found,
-            "expected_flags": expected_flags,
-        })
+        cases.append(
+            {
+                "label": label,
+                "pos": pos,
+                "side": side,
+                "flags": found,
+                "expected_flags": expected_flags,
+            }
+        )
 
     # Single insertion
-    test_mapping("single insertion", [[2, 0, 4]],
-                 [(0, 1, 0, False), (2, 1, 6, False), (2, -1, 2, False), (3, 1, 7, False)])
+    test_mapping(
+        "single insertion",
+        [[2, 0, 4]],
+        [(0, 1, 0, False), (2, 1, 6, False), (2, -1, 2, False), (3, 1, 7, False)],
+    )
 
     # Single deletion
-    test_mapping("single deletion", [[2, 4, 0]],
-                 [(0, 1, 0, False), (2, -1, 2, False), (3, 1, 2, True),
-                  (6, 1, 2, False), (6, -1, 2, True), (7, 1, 3, False)])
+    test_mapping(
+        "single deletion",
+        [[2, 4, 0]],
+        [
+            (0, 1, 0, False),
+            (2, -1, 2, False),
+            (3, 1, 2, True),
+            (6, 1, 2, False),
+            (6, -1, 2, True),
+            (7, 1, 3, False),
+        ],
+    )
 
     # Single replace
-    test_mapping("single replace", [[2, 4, 4]],
-                 [(0, 1, 0, False), (2, 1, 2, False), (4, 1, 6, True),
-                  (4, -1, 2, True), (6, -1, 6, False), (8, 1, 8, False)])
+    test_mapping(
+        "single replace",
+        [[2, 4, 4]],
+        [
+            (0, 1, 0, False),
+            (2, 1, 2, False),
+            (4, 1, 6, True),
+            (4, -1, 2, True),
+            (6, -1, 6, False),
+            (8, 1, 8, False),
+        ],
+    )
 
     # Deletion flags
     test_del("del before 1", [[0, 2, 0]], 2, -1, "db")
@@ -276,9 +302,12 @@ def generate_mapping_tests():
 # Test: Step merge
 # ---------------------------------------------------------------------------
 
+
 def generate_step_merge_tests():
     """Port of prosemirror-transform/test/test-step.ts"""
-    test_doc = schema.node("doc", {}, [schema.node("paragraph", {}, [schema.text("foobar")])])
+    test_doc = schema.node(
+        "doc", {}, [schema.node("paragraph", {}, [schema.text("foobar")])]
+    )
 
     def mk_step(from_pos, to_pos, val):
         if val == "+em":
@@ -300,25 +329,29 @@ def generate_step_merge_tests():
         merged = s1.merge(s2)
         doc1 = s2.apply(s1.apply(test_doc).doc).doc
         doc2 = merged.apply(test_doc).doc if merged else None
-        cases.append({
-            "label": label,
-            "should_merge": True,
-            "step1": s1.to_json(),
-            "step2": s2.to_json(),
-            "result_after_both": doc1.to_json(),
-            "result_after_merged": doc2.to_json() if doc2 else None,
-        })
+        cases.append(
+            {
+                "label": label,
+                "should_merge": True,
+                "step1": s1.to_json(),
+                "step2": s2.to_json(),
+                "result_after_both": doc1.to_json(),
+                "result_after_merged": doc2.to_json() if doc2 else None,
+            }
+        )
 
     def no(label, f1, t1, v1, f2, t2, v2):
         s1 = mk_step(f1, t1, v1)
         s2 = mk_step(f2, t2, v2)
         merged = s1.merge(s2)
-        cases.append({
-            "label": label,
-            "should_merge": False,
-            "step1": s1.to_json(),
-            "step2": s2.to_json(),
-        })
+        cases.append(
+            {
+                "label": label,
+                "should_merge": False,
+                "step1": s1.to_json(),
+                "step2": s2.to_json(),
+            }
+        )
 
     yes("merges typing changes", 2, 2, "a", 3, 3, "b")
     yes("merges inverse typing", 2, 2, "a", 2, 2, "b")
@@ -347,6 +380,7 @@ def generate_step_merge_tests():
 # Test: Transform addMark / removeMark
 # ---------------------------------------------------------------------------
 
+
 def generate_transform_mark_tests():
     """Port of mark-related tests from test-trans.ts"""
     cases = []
@@ -354,47 +388,79 @@ def generate_transform_mark_tests():
     def add_mark(label, doc_node, from_pos, to_pos, mark_name):
         tr = Transform(doc_node)
         tr.add_mark(from_pos, to_pos, schema.mark(mark_name))
-        cases.append({
-            "label": label,
-            "type": "addMark",
-            "input": doc_node.to_json(),
-            "from": from_pos,
-            "to": to_pos,
-            "mark": mark_name,
-            "expected": tr.doc.to_json(),
-        })
+        cases.append(
+            {
+                "label": label,
+                "type": "addMark",
+                "input": doc_node.to_json(),
+                "from": from_pos,
+                "to": to_pos,
+                "mark": mark_name,
+                "expected": tr.doc.to_json(),
+            }
+        )
 
     def remove_mark(label, doc_node, from_pos, to_pos, mark_name):
         tr = Transform(doc_node)
         tr.remove_mark(from_pos, to_pos, schema.mark(mark_name))
-        cases.append({
-            "label": label,
-            "type": "removeMark",
-            "input": doc_node.to_json(),
-            "from": from_pos,
-            "to": to_pos,
-            "mark": mark_name,
-            "expected": tr.doc.to_json(),
-        })
+        cases.append(
+            {
+                "label": label,
+                "type": "removeMark",
+                "input": doc_node.to_json(),
+                "from": from_pos,
+                "to": to_pos,
+                "mark": mark_name,
+                "expected": tr.doc.to_json(),
+            }
+        )
 
     # addMark tests
-    add_mark("can add a mark",
-             schema.node("doc", {}, [schema.node("paragraph", {}, [schema.text("hello there!")])]),
-             7, 12, "strong")
+    add_mark(
+        "can add a mark",
+        schema.node(
+            "doc", {}, [schema.node("paragraph", {}, [schema.text("hello there!")])]
+        ),
+        7,
+        12,
+        "strong",
+    )
 
     # NOTE: correct positions are 25,26 (not 26,27) to actually mark the final 'i'
-    add_mark("can add a mark in a nested node",
-             schema.node("doc", {}, [
-                 blockquote(schema.node("paragraph", {}, [schema.text("the variable is called i")]))
-             ]),
-             25, 26, "code")
+    add_mark(
+        "can add a mark in a nested node",
+        schema.node(
+            "doc",
+            {},
+            [
+                blockquote(
+                    schema.node(
+                        "paragraph", {}, [schema.text("the variable is called i")]
+                    )
+                )
+            ],
+        ),
+        25,
+        26,
+        "code",
+    )
 
     # removeMark tests
-    remove_mark("can cut a gap",
-                schema.node("doc", {}, [schema.node("paragraph", {}, [
-                    schema.text("hello world!", [schema.mark("em")])
-                ])]),
-                7, 12, "em")
+    remove_mark(
+        "can cut a gap",
+        schema.node(
+            "doc",
+            {},
+            [
+                schema.node(
+                    "paragraph", {}, [schema.text("hello world!", [schema.mark("em")])]
+                )
+            ],
+        ),
+        7,
+        12,
+        "em",
+    )
 
     save("transform_marks", {"cases": cases})
 
@@ -403,6 +469,7 @@ def generate_transform_mark_tests():
 # Test: Transform insert / delete
 # ---------------------------------------------------------------------------
 
+
 def generate_transform_edit_tests():
     """Port of insert/delete tests from test-trans.ts"""
     cases = []
@@ -410,46 +477,55 @@ def generate_transform_edit_tests():
     def insert_test(label, doc_node, pos, content):
         tr = Transform(doc_node)
         tr.insert(pos, content)
-        cases.append({
-            "label": label,
-            "type": "insert",
-            "input": doc_node.to_json(),
-            "pos": pos,
-            "content": content.to_json() if isinstance(content, Fragment) else None,
-            "expected": tr.doc.to_json(),
-        })
+        cases.append(
+            {
+                "label": label,
+                "type": "insert",
+                "input": doc_node.to_json(),
+                "pos": pos,
+                "content": content.to_json() if isinstance(content, Fragment) else None,
+                "expected": tr.doc.to_json(),
+            }
+        )
 
     def delete_test(label, doc_node, from_pos, to_pos):
         tr = Transform(doc_node)
         tr.delete(from_pos, to_pos)
-        cases.append({
-            "label": label,
-            "type": "delete",
-            "input": doc_node.to_json(),
-            "from": from_pos,
-            "to": to_pos,
-            "expected": tr.doc.to_json(),
-        })
+        cases.append(
+            {
+                "label": label,
+                "type": "delete",
+                "input": doc_node.to_json(),
+                "from": from_pos,
+                "to": to_pos,
+                "expected": tr.doc.to_json(),
+            }
+        )
 
     # insert
-    insert_test("can insert a break",
-                schema.node("doc", {}, [p("hellothere")]),
-                6,
-                Fragment.from_([schema.node("hard_break")]))
+    insert_test(
+        "can insert a break",
+        schema.node("doc", {}, [p("hellothere")]),
+        6,
+        Fragment.from_([schema.node("hard_break")]),
+    )
 
-    insert_test("can insert an empty paragraph at the top",
-                schema.node("doc", {}, [p("one"), p("two")]),
-                5,
-                Fragment.from_([schema.node("paragraph")]))
+    insert_test(
+        "can insert an empty paragraph at the top",
+        schema.node("doc", {}, [p("one"), p("two")]),
+        5,
+        Fragment.from_([schema.node("paragraph")]),
+    )
 
     # delete
-    delete_test("can delete a word",
-                schema.node("doc", {}, [p("one"), p("two"), p("three")]),
-                5, 10)
+    delete_test(
+        "can delete a word",
+        schema.node("doc", {}, [p("one"), p("two"), p("three")]),
+        5,
+        10,
+    )
 
-    delete_test("can delete text",
-                schema.node("doc", {}, [p("hello you")]),
-                5, 7)
+    delete_test("can delete text", schema.node("doc", {}, [p("hello you")]), 5, 7)
 
     save("transform_edit", {"cases": cases})
 
@@ -458,6 +534,7 @@ def generate_transform_edit_tests():
 # Test: Transform join / split
 # ---------------------------------------------------------------------------
 
+
 def generate_transform_structure_tests():
     """Port of join/split tests from test-trans.ts (simplified for fixtures)"""
     cases = []
@@ -465,26 +542,22 @@ def generate_transform_structure_tests():
     def split_test(label, doc_node, pos):
         tr = Transform(doc_node)
         tr.split(pos)
-        cases.append({
-            "label": label,
-            "type": "split",
-            "input": doc_node.to_json(),
-            "pos": pos,
-            "expected": tr.doc.to_json(),
-        })
+        cases.append(
+            {
+                "label": label,
+                "type": "split",
+                "input": doc_node.to_json(),
+                "pos": pos,
+                "expected": tr.doc.to_json(),
+            }
+        )
 
     # split
-    split_test("can split a textblock",
-               schema.node("doc", {}, [p("foobar")]),
-               4)
+    split_test("can split a textblock", schema.node("doc", {}, [p("foobar")]), 4)
 
-    split_test("can split at the start",
-               schema.node("doc", {}, [p("foobar")]),
-               1)
+    split_test("can split at the start", schema.node("doc", {}, [p("foobar")]), 1)
 
-    split_test("can split at the end",
-               schema.node("doc", {}, [p("foobar")]),
-               7)
+    split_test("can split at the end", schema.node("doc", {}, [p("foobar")]), 7)
 
     save("transform_structure", {"cases": cases})
 
@@ -492,6 +565,7 @@ def generate_transform_structure_tests():
 # ---------------------------------------------------------------------------
 # Test: Replace (the smart replace / Fitter)
 # ---------------------------------------------------------------------------
+
 
 def generate_replace_tests():
     """Port of replace tests from test-trans.ts"""
@@ -506,47 +580,63 @@ def generate_replace_tests():
             slice = source
         tr = Transform(doc_node)
         tr.replace(from_pos, to_pos, slice)
-        cases.append({
-            "label": label,
-            "type": "replace",
-            "input": doc_node.to_json(),
-            "from": from_pos,
-            "to": to_pos,
-            "slice": slice.to_json() if hasattr(slice, "to_json") else None,
-            "expected": tr.doc.to_json(),
-        })
+        cases.append(
+            {
+                "label": label,
+                "type": "replace",
+                "input": doc_node.to_json(),
+                "from": from_pos,
+                "to": to_pos,
+                "slice": slice.to_json() if hasattr(slice, "to_json") else None,
+                "expected": tr.doc.to_json(),
+            }
+        )
 
     # can delete text
-    replace_test("can delete text",
-                 schema.node("doc", {}, [p("hello you")]),
-                 5, 7, None)
+    replace_test(
+        "can delete text", schema.node("doc", {}, [p("hello you")]), 5, 7, None
+    )
 
     # can join blocks
-    replace_test("can join blocks",
-                 schema.node("doc", {}, [p("hello"), p("you")]),
-                 5, 8, None)
+    replace_test(
+        "can join blocks", schema.node("doc", {}, [p("hello"), p("you")]), 5, 8, None
+    )
 
     # can overwrite text
-    replace_test("can overwrite text",
-                 schema.node("doc", {}, [p("hello you")]),
-                 5, 7,
-                 schema.node("doc", {}, [p("i k")]))
+    replace_test(
+        "can overwrite text",
+        schema.node("doc", {}, [p("hello you")]),
+        5,
+        7,
+        schema.node("doc", {}, [p("i k")]),
+    )
 
     # can add a textblock
-    replace_test("can add a textblock",
-                 schema.node("doc", {}, [p("helloyou")]),
-                 6, 6,
-                 schema.node("doc", {}, [p("there")]))
+    replace_test(
+        "can add a textblock",
+        schema.node("doc", {}, [p("helloyou")]),
+        6,
+        6,
+        schema.node("doc", {}, [p("there")]),
+    )
 
     # merges blocks across deleted content
-    replace_test("merges blocks across deleted content",
-                 schema.node("doc", {}, [p("a"), p("b"), p("c")]),
-                 3, 6, None)
+    replace_test(
+        "merges blocks across deleted content",
+        schema.node("doc", {}, [p("a"), p("b"), p("c")]),
+        3,
+        6,
+        None,
+    )
 
     # can delete the whole document
-    replace_test("can delete the whole document",
-                 schema.node("doc", {}, [h(1, "hi"), p("you")]),
-                 0, 7, None)
+    replace_test(
+        "can delete the whole document",
+        schema.node("doc", {}, [h(1, "hi"), p("you")]),
+        0,
+        7,
+        None,
+    )
 
     save("replace", {"cases": cases})
 
@@ -555,30 +645,39 @@ def generate_replace_tests():
 # Test: Node / Fragment model
 # ---------------------------------------------------------------------------
 
+
 def generate_model_tests():
     """Port of model tests (slice, cut, nodesBetween, textBetween)"""
     cases = []
 
     # Slice tests
-    test_doc = schema.node("doc", {}, [
-        p("hello"),
-        blockquote(p("world")),
-    ])
+    test_doc = schema.node(
+        "doc",
+        {},
+        [
+            p("hello"),
+            blockquote(p("world")),
+        ],
+    )
 
-    def slice_test(label, doc_node, from_pos, to_pos, expected_open_start, expected_open_end):
+    def slice_test(
+        label, doc_node, from_pos, to_pos, expected_open_start, expected_open_end
+    ):
         s = doc_node.slice(from_pos, to_pos)
-        cases.append({
-            "label": label,
-            "type": "slice",
-            "input": doc_node.to_json(),
-            "from": from_pos,
-            "to": to_pos,
-            "content": s.content.to_json() if s.content.size else None,
-            "open_start": s.open_start,
-            "open_end": s.open_end,
-            "expected_open_start": expected_open_start,
-            "expected_open_end": expected_open_end,
-        })
+        cases.append(
+            {
+                "label": label,
+                "type": "slice",
+                "input": doc_node.to_json(),
+                "from": from_pos,
+                "to": to_pos,
+                "content": s.content.to_json() if s.content.size else None,
+                "open_start": s.open_start,
+                "open_end": s.open_end,
+                "expected_open_start": expected_open_start,
+                "expected_open_end": expected_open_end,
+            }
+        )
 
     slice_test("slice half paragraph", test_doc, 2, 4, 0, 0)
     slice_test("slice across blocks", test_doc, 2, 8, 0, 1)
@@ -586,28 +685,32 @@ def generate_model_tests():
     # textBetween tests
     def text_between_test(label, doc_node, from_pos, to_pos, expected):
         result = doc_node.text_between(from_pos, to_pos)
-        cases.append({
-            "label": label,
-            "type": "text_between",
-            "input": doc_node.to_json(),
-            "from": from_pos,
-            "to": to_pos,
-            "result": result,
-            "expected": expected,
-        })
+        cases.append(
+            {
+                "label": label,
+                "type": "text_between",
+                "input": doc_node.to_json(),
+                "from": from_pos,
+                "to": to_pos,
+                "result": result,
+                "expected": expected,
+            }
+        )
 
     text_between_test("text between in paragraph", test_doc, 1, 6, "hello")
     text_between_test("text between in doc", test_doc, 1, 10, "hello")
 
     # nodeSize
     def size_test(label, doc_node, expected):
-        cases.append({
-            "label": label,
-            "type": "node_size",
-            "input": doc_node.to_json(),
-            "size": doc_node.node_size,
-            "expected": expected,
-        })
+        cases.append(
+            {
+                "label": label,
+                "type": "node_size",
+                "input": doc_node.to_json(),
+                "size": doc_node.node_size,
+                "expected": expected,
+            }
+        )
 
     size_test("empty doc size", schema.node("doc", {}, [p()]), 3)
     size_test("doc with text", schema.node("doc", {}, [p("hi")]), 5)
@@ -619,27 +722,42 @@ def generate_model_tests():
 # Test: Resolve
 # ---------------------------------------------------------------------------
 
+
 def generate_resolve_tests():
     """Port of prosemirror-model/test/test-resolve.ts"""
-    test_doc = schema.node("doc", {}, [
-        schema.node("paragraph", {}, [schema.text("ab")]),
-        schema.node("blockquote", {}, [
-            schema.node("paragraph", {}, [
-                schema.text("cd", [schema.mark("em")]),
-                schema.text("ef"),
-            ])
-        ]),
-    ])
+    test_doc = schema.node(
+        "doc",
+        {},
+        [
+            schema.node("paragraph", {}, [schema.text("ab")]),
+            schema.node(
+                "blockquote",
+                {},
+                [
+                    schema.node(
+                        "paragraph",
+                        {},
+                        [
+                            schema.text("cd", [schema.mark("em")]),
+                            schema.text("ef"),
+                        ],
+                    )
+                ],
+            ),
+        ],
+    )
 
     cases = []
     for pos in range(test_doc.content.size + 1):
         rp = test_doc.resolve(pos)
-        cases.append({
-            "pos": pos,
-            "depth": rp.depth,
-            "parent_offset": rp.parent_offset,
-            "parent_type": rp.parent.type.name,
-        })
+        cases.append(
+            {
+                "pos": pos,
+                "depth": rp.depth,
+                "parent_offset": rp.parent_offset,
+                "parent_type": rp.parent.type.name,
+            }
+        )
 
     save("resolve", {"doc": test_doc.to_json(), "cases": cases})
 
@@ -648,25 +766,42 @@ def generate_resolve_tests():
 # Test: JSON round-trip for documents
 # ---------------------------------------------------------------------------
 
+
 def generate_roundtrip_tests():
     """Verify that documents survive JSON serialization round-trip."""
     docs = [
         schema.node("doc", {}, [p("hello world")]),
         schema.node("doc", {}, [h(1, "Title"), p("text"), blockquote(p("quote"))]),
         schema.node("doc", {}, [p("one"), p("two"), p("three")]),
-        schema.node("doc", {}, [
-            schema.node("paragraph", {}, [
-                schema.text("bold", [schema.mark("strong")]),
-                schema.text(" and "),
-                schema.text("italic", [schema.mark("em")]),
-            ])
-        ]),
-        schema.node("doc", {}, [
-            schema.node("ordered_list", {}, [
-                schema.node("list_item", {}, [p("first")]),
-                schema.node("list_item", {}, [p("second")]),
-            ])
-        ]),
+        schema.node(
+            "doc",
+            {},
+            [
+                schema.node(
+                    "paragraph",
+                    {},
+                    [
+                        schema.text("bold", [schema.mark("strong")]),
+                        schema.text(" and "),
+                        schema.text("italic", [schema.mark("em")]),
+                    ],
+                )
+            ],
+        ),
+        schema.node(
+            "doc",
+            {},
+            [
+                schema.node(
+                    "ordered_list",
+                    {},
+                    [
+                        schema.node("list_item", {}, [p("first")]),
+                        schema.node("list_item", {}, [p("second")]),
+                    ],
+                )
+            ],
+        ),
     ]
 
     cases = []
@@ -674,11 +809,13 @@ def generate_roundtrip_tests():
         json_data = d.to_json()
         restored = Node.from_json(schema, json_data)
         assert d.eq(restored), f"Round-trip failed for {json_data}"
-        cases.append({
-            "json": json_data,
-            "roundtrip_ok": True,
-            "node_size": d.node_size,
-        })
+        cases.append(
+            {
+                "json": json_data,
+                "roundtrip_ok": True,
+                "node_size": d.node_size,
+            }
+        )
 
     save("roundtrip", {"cases": cases})
 

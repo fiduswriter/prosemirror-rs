@@ -47,7 +47,7 @@ impl AttrStep {
         // If pos points to the start of a node, that node is the target.
         // Otherwise, if pos is inside a node, we target that node.
         let resolved = doc.resolve(self.pos)?;
-        
+
         // The target node is the node at the deepest resolved level.
         // We need to find it in its parent's children and replace it.
         let depth = resolved.depth;
@@ -60,11 +60,11 @@ impl AttrStep {
             let new_doc = doc.copy(|_| new_content.into_owned());
             return Ok(new_doc);
         }
-        
+
         // Walk from the deepest level up, rebuilding each level
         let target = resolved.node(depth);
         let new_target = target.with_attr(&self.attr, self.value.clone());
-        
+
         // Rebuild parent chain bottom-up
         let mut current_node = new_target;
         for d in (1..=depth).rev() {
