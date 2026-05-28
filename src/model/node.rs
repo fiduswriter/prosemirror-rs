@@ -56,9 +56,29 @@ pub trait NodeType<S: Schema>: Copy + Clone + Debug + PartialEq + Eq {
         false
     }
 
+    /// Whether this type is defining (for replaceRange behavior)
+    fn is_defining(self) -> bool {
+        false
+    }
+
+    /// Whether this type is defining as context (for replaceRange behavior)
+    fn is_defining_as_context(self) -> bool {
+        false
+    }
+
+    /// Whether this type is defining for content (for replaceRange behavior)
+    fn is_defining_for_content(self) -> bool {
+        false
+    }
+
     /// Whether this node type has required attributes (no defaults)
     fn has_required_attrs(self) -> bool {
         false
+    }
+
+    /// Whitespace handling mode for this node type (e.g. "pre")
+    fn whitespace(self) -> Option<String> {
+        None
     }
 
     /// Create a node of this type, filling in missing required child nodes
@@ -329,12 +349,17 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
     /// Get the node at the given document position.
     /// Returns the node that covers the position (for non-text content positions,
     /// returns the child node; for text positions, returns the text node).
-    fn node_at(&self, pos: usize) -> Option<&Self> {
-        if pos == 0 {
-            return Some(self);
+    fn node_at(&self, mut pos: usize) -> Option<&Self> {
+        let mut node: &Self = self;
+        loop {
+            let content = node.content()?;
+            let idx = content.find_index(pos, false).ok()?;
+            node = content.maybe_child(idx.index)?;
+            if idx.offset == pos || node.is_text() {
+                return Some(node);
+            }
+            pos -= idx.offset + 1;
         }
-        let content = self.content()?;
-        content.node_at(pos)
     }
 
     /// True when this is a block (non-inline node)
@@ -539,7 +564,7 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
     fn check(&self) -> Result<(), String> {
         if let Some(c) = self.content() {
             if !self.r#type().valid_content(c) {
-                return Err("Invalid content for node".to_string());
+                return Err(format!("Invalid content for node {}", self.r#type().name()));
             }
             for child in c.children() {
                 child.check()?;
@@ -547,7 +572,7 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
         }
         if let Some(marks) = self.marks() {
             if !self.r#type().allow_marks(marks) {
-                return Err("Invalid marks for node".to_string());
+                return Err(format!("Invalid marks for node {}", self.r#type().name()));
             }
         }
         Ok(())

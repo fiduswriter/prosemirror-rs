@@ -102,6 +102,28 @@ impl<S: Schema> Fragment<S> {
         Self::default()
     }
 
+    /// Create a fragment from an array of nodes, joining adjacent text nodes
+    /// with the same marks (matching ProseMirror JS `Fragment.fromArray`).
+    pub fn from_array(mut nodes: Vec<S::Node>) -> Self {
+        if nodes.is_empty() {
+            return Fragment::new();
+        }
+        let mut result = vec![nodes.remove(0)];
+        for node in nodes {
+            let last = result.last_mut().unwrap();
+            if let Some(n1) = last.text_node() {
+                if let Some(n2) = n1.same_markup(&node) {
+                    let mid =
+                        n1.with_text(Text::from(n1.text.as_str().to_owned() + n2.text.as_str()));
+                    *last = S::Node::from(mid);
+                    continue;
+                }
+            }
+            result.push(node);
+        }
+        Fragment::from(result)
+    }
+
     /// The size of the fragment, which is the total of the size of its content nodes.
     pub fn size(&self) -> usize {
         self.size

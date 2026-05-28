@@ -1,6 +1,17 @@
 //! Structure analysis utilities for document transformations.
 
 use crate::model::{ContentMatch, Node, NodeType, ResolvedPos, Schema, Slice};
+use serde_json::Value;
+
+/// A wrapper descriptor for `Transform.wrap`, matching upstream JS.
+#[derive(Debug, Clone)]
+/// A wrapper descriptor used by `find_wrapping`.
+pub struct Wrapper<S: Schema> {
+    /// The node type to wrap with.
+    pub node_type: S::NodeType,
+    /// The attributes for the wrapper node.
+    pub attrs: Value,
+}
 
 /// Test whether a node can be cut at the given child indices.
 pub fn can_cut<S: Schema>(node: &S::Node, start: usize, end: usize) -> bool {
@@ -55,12 +66,15 @@ pub fn find_wrapping<S: Schema>(
     range: &NodeRange<S>,
     node_type: S::NodeType,
     _attrs_check: impl Fn(&S::NodeType) -> bool,
-) -> Option<Vec<S::NodeType>> {
+) -> Option<Vec<Wrapper<S>>> {
     let around = find_wrapping_outside(range, node_type)?;
     let inner = find_wrapping_inside(range, node_type)?;
 
     let mut result = around;
-    result.push(node_type);
+    result.push(Wrapper {
+        node_type,
+        attrs: Value::Null,
+    });
     result.extend(inner);
     // Check that the first around type can be inserted
     if result.is_empty() {
@@ -73,7 +87,7 @@ pub fn find_wrapping<S: Schema>(
 pub fn find_wrapping_outside<S: Schema>(
     range: &NodeRange<S>,
     node_type: S::NodeType,
-) -> Option<Vec<S::NodeType>> {
+) -> Option<Vec<Wrapper<S>>> {
     let parent = range.parent();
     let start_index = range.start_index();
     let end_index = range.end_index();
@@ -87,7 +101,15 @@ pub fn find_wrapping_outside<S: Schema>(
         around[0]
     };
     if parent.can_replace_with(start_index, end_index, outer) {
-        Some(around)
+        Some(
+            around
+                .into_iter()
+                .map(|t| Wrapper {
+                    node_type: t,
+                    attrs: Value::Null,
+                })
+                .collect(),
+        )
     } else {
         None
     }
@@ -97,7 +119,7 @@ pub fn find_wrapping_outside<S: Schema>(
 pub fn find_wrapping_inside<S: Schema>(
     range: &NodeRange<S>,
     node_type: S::NodeType,
-) -> Option<Vec<S::NodeType>> {
+) -> Option<Vec<Wrapper<S>>> {
     let parent = range.parent();
     let start_index = range.start_index();
     let end_index = range.end_index();
@@ -118,7 +140,15 @@ pub fn find_wrapping_inside<S: Schema>(
         i += 1;
     }
     match inner_match {
-        Some(m) if m.valid_end() => Some(inside),
+        Some(m) if m.valid_end() => Some(
+            inside
+                .into_iter()
+                .map(|t| Wrapper {
+                    node_type: t,
+                    attrs: Value::Null,
+                })
+                .collect(),
+        ),
         _ => None,
     }
 }

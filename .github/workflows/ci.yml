@@ -127,6 +127,18 @@ jobs:
           print("OK:", out)
           EOF
 
+      - name: Run upstream Python tests against Rust shim
+        working-directory: python
+        env:
+          PYTHONPATH: tests/shim
+        run: |
+          pip install pytest
+          pytest tests/upstream/ \
+            --ignore=tests/upstream/test_dom.py \
+            --ignore=tests/upstream/test_node.py \
+            -v --tb=short
+        continue-on-error: true
+
   test-python-free-threaded:
     name: Python Free-threaded (3.13t)
     runs-on: ubuntu-latest

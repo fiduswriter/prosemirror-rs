@@ -1,10 +1,10 @@
 //! Regression tests for transform wrapping behavior.
 
-use prosemirror::dynamic::types::Dyn;
 use prosemirror::dynamic::{DynamicNode, DynamicSchema};
-use prosemirror::model::{ContentMatch, Fragment, MarkSet, Node, NodeType};
+use prosemirror::model::{ContentMatch, Fragment, Node, NodeType};
 use prosemirror::transform::structure::NodeRange;
-use prosemirror::transform::Transform;
+use prosemirror::transform::{Transform, Wrapper};
+use serde_json::Value;
 
 fn wrapper_schema() -> DynamicSchema {
     DynamicSchema::from_json(&serde_json::json!({
@@ -54,8 +54,14 @@ fn wrap_rejects_wrapper_stack_when_content_match_fails() {
         );
 
         let wrappers = [
-            (outer, None::<MarkSet<Dyn>>),
-            (bad_wrapper, None::<MarkSet<Dyn>>),
+            Wrapper {
+                node_type: outer,
+                attrs: Value::Null,
+            },
+            Wrapper {
+                node_type: bad_wrapper,
+                attrs: Value::Null,
+            },
         ];
         let mut tr = Transform::new(doc);
 

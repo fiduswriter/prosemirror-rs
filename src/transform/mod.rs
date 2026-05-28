@@ -18,6 +18,7 @@ pub use node_mark_step::{AddNodeMarkStep, RemoveNodeMarkStep};
 pub use replace::{close_fragment, covered_depths, replace_step as smart_replace_step};
 pub use replace_step::{ReplaceAroundStep, ReplaceStep};
 pub use step::{StepError, StepKind, StepResult};
+pub use structure::Wrapper;
 pub use transform::Transform;
 pub use util::Span;
 
@@ -99,7 +100,8 @@ impl<S: Schema> Step<S> {
             Self::RemoveMark(rm_step) => rm_step.invert(doc),
             Self::AddNodeMark(anm_step) => anm_step.invert(doc),
             Self::RemoveNodeMark(rnm_step) => rnm_step.invert(doc),
-            other => other.clone(),
+            Self::Attr(a_step) => a_step.invert(doc),
+            Self::DocAttr(da_step) => da_step.invert(doc),
         }
     }
 
@@ -432,9 +434,10 @@ mod tests {
                 .unwrap();
 
             // Change heading level from 1 to 2.
-            // Position 1 is the start of the heading (after doc open, before heading open).
+            // Position 0 is before the first child (the heading), which is what
+            // node_at(0) returns — matching upstream JS Node.nodeAt semantics.
             let step: Step<Dyn> = Step::Attr(AttrStep {
-                pos: 1,
+                pos: 0,
                 attr: "level".to_string(),
                 value: serde_json::json!(2),
             });

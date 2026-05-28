@@ -134,7 +134,7 @@ pub trait Mark<S: Schema<Mark = Self>>:
 
     /// Check if a mark of this type is in the given set
     fn is_in_set(&self, set: &MarkSet<S>) -> bool {
-        set.content.iter().any(|m| m.r#type() == self.r#type())
+        set.content.iter().any(|m| m == self)
     }
 
     /// Given a set of marks, create a new set which contains this one as well, in the right

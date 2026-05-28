@@ -253,34 +253,82 @@ Currently implemented syntax includes `*`, `+`, `?`, `|`, simple grouping with
 
 The test suite is structured as:
 
-1. **Library unit tests** (`cargo test --lib`) — 44 tests covering model internals,
-   transform operations, content expression parsing, and dynamic schema loading.
+### Rust tests
 
-2. **Integration tests** (`tests/`) — Ported from the JS and Python test suites:
+```bash
+# Run all Rust tests (library + integration)
+cargo test --all
+```
 
-   - `tests/test_resolve.rs` — 9 tests from `prosemirror-model/test/test-resolve.ts`
-   - `tests/test_mapping.rs` — 11 tests from `prosemirror-transform/test/test-mapping.ts`
+**Library unit tests** (`cargo test --lib`) — 54 tests covering model internals,
+transform operations, content expression parsing, and dynamic schema loading.
 
-3. **Python-generated fixtures** (`tests/spec/`) — A Python script that uses
-   `prosemirror-py` to generate expected JSON outputs. These can be consumed
-   by Rust tests for cross-implementation validation:
+**Integration tests** (`tests/`) — Ported from the JS and Python test suites:
 
-   ```bash
-   # Generate fixtures using prosemirror-py
-   cd ../prosemirror-py
-   python ../prosemirror-rs/tests/spec/generate_fixtures.py
-   ```
+- `tests/test_resolve.rs` — 9 tests from `prosemirror-model/test/test-resolve.ts`
+- `tests/test_mapping.rs` — 11 tests from `prosemirror-transform/test/test-mapping.ts`
+- `tests/test_transform_wrap.rs` — Wrapper-stack validation and content-match tests
 
-   Generated JSON files in `tests/spec/expected/`:
-   - `mapping.json` — StepMap/Mapping test cases
-   - `step_merge.json` — Step merge test cases
-   - `transform_marks.json` — addMark/removeMark test cases
-   - `transform_edit.json` — insert/delete test cases
-   - `transform_structure.json` — split test cases
-   - `replace.json` — Replace test cases
-   - `model.json` — Slice/size/textContent test cases
-   - `resolve.json` — ResolvedPos test cases
-   - `roundtrip.json` — JSON round-trip test cases
+### Python upstream tests (against Rust shim)
+
+The `python/tests/upstream/` directory contains the full test suite from
+[`prosemirror-py`](https://github.com/fellowapp/prosemirror-py), run against
+the Rust implementation through a thin compatibility shim
+(`python/tests/shim/prosemirror/`).
+
+```bash
+cd python
+maturin develop
+PYTHONPATH=tests/shim pytest tests/upstream/ \
+  --ignore=tests/upstream/test_dom.py \
+  --ignore=tests/upstream/test_node.py \
+  -v
+```
+
+> **Note:** `test_dom.py` is skipped because DOM parsing/serialization is out
+> of scope for the server-side crate. `test_node.py` is skipped because it
+> constructs schemas with Python callable values (`leafText`, `toDebugString`)
+> that the current PyO3 bindings do not yet support.
+
+**Current upstream Python results** (run against the Rust shim):
+
+| File | Total | Passed | Failed |
+|---|---|---|---|
+| `test_slice.py` | 20 | 20 | 0 |
+| `test_resolve.py` | 27 | 27 | 0 |
+| `test_mapping.py` | 23 | 23 | 0 |
+| `test_replace.py` | 22 | 22 | 0 |
+| `test_diff.py` | 18 | 18 | 0 |
+| `test_structure.py` | 38 | 38 | 0 |
+| `test_replace_step.py` | 2 | 2 | 0 |
+| `test_step.py` | 19 | 18 | 1 |
+| `test_mark.py` | 21 | 16 | 5 |
+| `test_content.py` | 62 | 24 | 38 |
+| `test_trans.py` | 164 | 108 | 56 |
+| **Total** | **416** | **315** | **101** |
+
+### Python-generated fixtures
+
+`tests/spec/` contains a Python script that uses `prosemirror-py` to generate
+expected JSON outputs. These can be consumed by Rust tests for
+cross-implementation validation:
+
+```bash
+# Generate fixtures using prosemirror-py
+cd ../prosemirror-py
+python ../prosemirror-rs/tests/spec/generate_fixtures.py
+```
+
+Generated JSON files in `tests/spec/expected/`:
+- `mapping.json` — StepMap/Mapping test cases
+- `step_merge.json` — Step merge test cases
+- `transform_marks.json` — addMark/removeMark test cases
+- `transform_edit.json` — insert/delete test cases
+- `transform_structure.json` — split test cases
+- `replace.json` — Replace test cases
+- `model.json` — Slice/size/textContent test cases
+- `resolve.json` — ResolvedPos test cases
+- `roundtrip.json` — JSON round-trip test cases
 
 ## Feature flags
 

@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyString};
 
 use prosemirror::dynamic::types::{
-    Dyn, DynamicMark, DynamicMarkType, DynamicNode, DynamicNodeType,
+    Dyn, DynamicMark, DynamicMarkType, DynamicNode, DynamicNodeType, ParsedContentMatch,
 };
 use prosemirror::dynamic::DynamicSchema;
 use prosemirror::model::{Fragment, MarkSet, Node, NodeType, ResolvedPos, Slice};
@@ -13,6 +13,38 @@ use prosemirror::model::{Fragment, MarkSet, Node, NodeType, ResolvedPos, Slice};
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Recursively strip Python callables from a dict/list structure,
+/// replacing them with `None`. This allows schema specs that contain
+/// callbacks (e.g. `leafText`, `toDebugString`) to be passed through
+/// JSON deserialization.
+pub fn strip_callables<'py>(
+    py: Python<'py>,
+    obj: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    if obj.is_callable() {
+        return Ok(py.None().into_bound(py));
+    }
+    if obj.is_none() {
+        return Ok(py.None().into_bound(py));
+    }
+    if let Ok(list) = obj.cast::<PyList>() {
+        let new_list = PyList::new(py, [] as [Bound<'py, PyAny>; 0])?;
+        for item in list.iter() {
+            new_list.append(strip_callables(py, &item)?)?;
+        }
+        return Ok(new_list.into_any());
+    }
+    if let Ok(dict) = obj.cast::<PyDict>() {
+        let new_dict = PyDict::new(py);
+        for (k, v) in dict.iter() {
+            new_dict.set_item(k, strip_callables(py, &v)?)?;
+        }
+        return Ok(new_dict.into_any());
+    }
+    // Primitives, strings, etc. pass through unchanged
+    Ok(obj.clone())
+}
 
 pub fn py_to_json(obj: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     if obj.is_none() {
@@ -115,12 +147,29 @@ fn extract_markset(obj: &Bound<'_, PyAny>) -> PyResult<MarkSet<Dyn>> {
         return Ok(set.borrow().inner.clone());
     }
     if let Ok(list) = obj.cast::<PyList>() {
-        let mut marks = MarkSet::new();
+        let mut marks = Vec::new();
+        let mut schema_opt: Option<Arc<DynamicSchema>> = None;
         for item in list.iter() {
-            let mark = item.cast::<PyMark>()?.borrow().inner.clone();
-            marks.add(&mark);
+            let py_mark = item.cast::<PyMark>()?;
+            let mark = py_mark.borrow().inner.clone();
+            if schema_opt.is_none() {
+                schema_opt = Some(py_mark.borrow().schema.clone());
+            }
+            marks.push(mark);
         }
-        return Ok(marks);
+        let mut mark_set = MarkSet::new();
+        if let Some(schema) = schema_opt {
+            schema.with_types(|| {
+                for mark in &marks {
+                    mark_set.add(mark);
+                }
+            });
+        } else {
+            for mark in &marks {
+                mark_set.add(mark);
+            }
+        }
+        return Ok(mark_set);
     }
     Err(PyValueError::new_err("Expected MarkSet or list of Mark"))
 }
@@ -133,6 +182,9 @@ fn extract_markset(obj: &Bound<'_, PyAny>) -> PyResult<MarkSet<Dyn>> {
 pub struct PySchema {
     pub(crate) inner: Arc<DynamicSchema>,
     spec: serde_json::Value,
+    /// The original Python spec dict, preserved so that callable values
+    /// (e.g. `leafText`, `toDebugString`) can be accessed by Python-side code.
+    raw_spec: Option<Py<PyAny>>,
 }
 
 impl PySchema {
@@ -140,6 +192,7 @@ impl PySchema {
         Self {
             inner: arc,
             spec: serde_json::Value::Null,
+            raw_spec: None,
         }
     }
 }
@@ -148,12 +201,15 @@ impl PySchema {
 impl PySchema {
     #[new]
     fn new(spec: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let json = py_to_json(spec)?;
+        let py = spec.py();
+        let stripped = strip_callables(py, spec)?;
+        let json = py_to_json(&stripped)?;
         let schema = DynamicSchema::from_json(&json)
             .map_err(|e| PyValueError::new_err(format!("Invalid schema: {e}")))?;
         Ok(PySchema {
             inner: Arc::new(schema),
             spec: json,
+            raw_spec: Some(spec.clone().unbind()),
         })
     }
 
@@ -356,6 +412,13 @@ impl PyNodeType {
         Ok(valid)
     }
 
+    fn allows_mark_type(&self, mark_type: &PyMarkType) -> PyResult<bool> {
+        let ok = self
+            .schema
+            .with_types(|| self.inner.allows_mark_type(mark_type.inner));
+        Ok(ok)
+    }
+
     fn __str__(&self) -> String {
         self.name.clone()
     }
@@ -372,7 +435,7 @@ impl PyNodeType {
 #[pyclass(name = "MarkType")]
 pub struct PyMarkType {
     schema: Arc<DynamicSchema>,
-    inner: DynamicMarkType,
+    pub(crate) inner: DynamicMarkType,
     name: String,
 }
 
@@ -587,7 +650,7 @@ impl PyFragment {
             inner_nodes.push(borrowed.inner.clone());
         }
         let schema = schema.unwrap_or_else(|| Arc::new(DynamicSchema::default()));
-        let frag = schema.with_types(|| Fragment::from(inner_nodes));
+        let frag = schema.with_types(|| Fragment::from_array(inner_nodes));
         Ok(PyFragment {
             schema,
             inner: frag,
@@ -662,6 +725,16 @@ impl PyFragment {
 
     fn __repr__(&self) -> String {
         format!("<Fragment {}>", self.__str__())
+    }
+
+    fn append(&self, other: &PyFragment) -> PyResult<PyFragment> {
+        let inner = self
+            .schema
+            .with_types(|| self.inner.clone().append(other.inner.clone()));
+        Ok(PyFragment {
+            schema: self.schema.clone(),
+            inner,
+        })
     }
 
     fn find_diff_start(&self, other: &PyFragment) -> PyResult<Option<usize>> {
@@ -778,7 +851,11 @@ fn node_to_debug_str(node: &DynamicNode) -> String {
             .map(node_to_debug_str)
             .collect::<Vec<_>>()
             .join(", ");
-        wrap_marks(&format!("{name}({inner})"), &node.marks)
+        if inner.is_empty() {
+            wrap_marks(name, &node.marks)
+        } else {
+            wrap_marks(&format!("{name}({inner})"), &node.marks)
+        }
     } else {
         wrap_marks(name, &node.marks)
     }
@@ -794,7 +871,12 @@ pub struct PyNode {
 impl PyNode {
     #[staticmethod]
     fn from_json(schema: &PySchema, json: &Bound<'_, PyAny>) -> PyResult<PyNode> {
-        let val = py_to_json(json)?;
+        let val = if let Ok(s) = json.extract::<String>() {
+            serde_json::from_str(&s)
+                .map_err(|e| PyValueError::new_err(format!("Invalid JSON string: {e}")))?
+        } else {
+            py_to_json(json)?
+        };
         let node = schema
             .inner
             .node_from_json(&val)
@@ -859,6 +941,12 @@ impl PyNode {
     }
 
     #[getter]
+    fn text(&self) -> Option<String> {
+        self.schema
+            .with_types(|| self.inner.text_node().map(|tn| tn.text.content.clone()))
+    }
+
+    #[getter]
     fn node_size(&self) -> usize {
         self.schema.with_types(|| self.inner.node_size())
     }
@@ -906,8 +994,10 @@ impl PyNode {
         })
     }
 
-    fn cut(&self, from: usize, to: usize) -> PyResult<PyNode> {
-        let node = self.schema.with_types(|| self.inner.cut(from..to));
+    #[pyo3(signature = (from_=0, to=None))]
+    fn cut(&self, from_: usize, to: Option<usize>) -> PyResult<PyNode> {
+        let to = to.unwrap_or_else(|| self.schema.with_types(|| self.inner.content_size()));
+        let node = self.schema.with_types(|| self.inner.cut(from_..to));
         Ok(PyNode {
             schema: self.schema.clone(),
             inner: node.into_owned(),
@@ -934,6 +1024,45 @@ impl PyNode {
         })
     }
 
+    fn copy(&self, content: &PyFragment) -> PyResult<PyNode> {
+        let node = self
+            .schema
+            .with_types(|| self.inner.copy(|_| content.inner.clone()));
+        Ok(PyNode {
+            schema: self.schema.clone(),
+            inner: node,
+        })
+    }
+
+    fn check(&self) -> PyResult<()> {
+        self.schema
+            .with_types(|| self.inner.check())
+            .map_err(|e| PyValueError::new_err(e))
+    }
+
+    fn node_at(&self, pos: usize) -> PyResult<Option<PyNode>> {
+        let result = self.schema.with_types(|| self.inner.node_at(pos));
+        Ok(result.map(|node| PyNode {
+            schema: self.schema.clone(),
+            inner: node.clone(),
+        }))
+    }
+
+    #[pyo3(signature = (from_, to, block_separator=None, leaf_text=None))]
+    fn text_between(
+        &self,
+        from_: usize,
+        to: usize,
+        block_separator: Option<&str>,
+        leaf_text: Option<&str>,
+    ) -> PyResult<String> {
+        let result = self.schema.with_types(|| {
+            self.inner
+                .text_between(from_, to, block_separator, leaf_text)
+        });
+        Ok(result)
+    }
+
     fn resolve(&self, pos: usize) -> PyResult<PyResolvedPos> {
         Ok(PyResolvedPos {
             schema: self.schema.clone(),
@@ -958,6 +1087,14 @@ impl PyNode {
         } else {
             Ok(false)
         }
+    }
+
+    fn to_json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let val = self
+            .schema
+            .with_types(|| serde_json::to_value(&self.inner))
+            .map_err(|e| PyValueError::new_err(format!("JSON serialization error: {e}")))?;
+        json_to_py(py, &val).map(|b| b.unbind())
     }
 
     fn __str__(&self) -> String {
@@ -1195,5 +1332,62 @@ impl PyNodeRange {
     #[getter]
     fn end(&self) -> usize {
         self.to_pos
+    }
+}
+
+#[pyclass(name = "ContentMatch")]
+pub struct PyContentMatch {
+    pub(crate) inner: ParsedContentMatch,
+}
+
+#[pymethods]
+impl PyContentMatch {
+    #[staticmethod]
+    fn parse(expr: &str, node_types: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let mut schema: Option<Arc<DynamicSchema>> = None;
+        for item in node_types.iter() {
+            let (_, value) = item;
+            if let Ok(py_node_type) = value.cast::<PyNodeType>() {
+                let nt = py_node_type.borrow();
+                schema = Some(nt.schema.clone());
+                break;
+            }
+        }
+        let schema = schema.ok_or_else(|| PyValueError::new_err("No valid node types provided"))?;
+        let inner = ParsedContentMatch::parse(expr, &schema)
+            .map_err(|e| PyValueError::new_err(format!("Content expression parse error: {e}")))?;
+        Ok(PyContentMatch { inner })
+    }
+
+    #[getter]
+    fn valid_end(&self) -> bool {
+        self.inner.valid_end()
+    }
+
+    fn match_type(&self, node_type: &PyNodeType) -> Option<PyContentMatch> {
+        self.inner
+            .match_type(node_type.inner)
+            .map(|cm| PyContentMatch { inner: cm })
+    }
+
+    fn match_fragment(&self, fragment: &PyFragment) -> Option<PyContentMatch> {
+        self.inner
+            .match_fragment(&fragment.inner)
+            .map(|cm| PyContentMatch { inner: cm })
+    }
+
+    #[pyo3(signature = (fragment, to_end=false, start_index=0))]
+    fn fill_before(
+        &self,
+        fragment: &PyFragment,
+        to_end: bool,
+        start_index: usize,
+    ) -> Option<PyFragment> {
+        self.inner
+            .fill_before(&fragment.inner, to_end, start_index)
+            .map(|f| PyFragment {
+                schema: fragment.schema.clone(),
+                inner: f,
+            })
     }
 }

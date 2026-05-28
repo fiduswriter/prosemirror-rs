@@ -37,44 +37,64 @@ impl AttrStep {
         }
     }
 
+    /// Return the inverse of this step, restoring the original attribute value.
+    pub fn invert<S: Schema>(&self, doc: &S::Node) -> super::Step<S> {
+        let node = doc.node_at(self.pos).unwrap_or(doc);
+        let attrs = node.attrs_json();
+        let old_value = attrs
+            .get(&self.attr)
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        super::Step::Attr(AttrStep {
+            pos: self.pos,
+            attr: self.attr.clone(),
+            value: old_value,
+        })
+    }
+
     /// Apply this step to the given document, setting an attribute on the node at `self.pos`.
     pub fn apply<S: Schema>(&self, doc: &S::Node) -> StepResult<S> {
-        if self.pos == 0 {
-            // Position 0 means the document root itself
-            return Ok(doc.with_attr(&self.attr, self.value.clone()));
-        }
-        // Resolve the position to find which node we're pointing at.
-        // If pos points to the start of a node, that node is the target.
-        // Otherwise, if pos is inside a node, we target that node.
-        let resolved = doc.resolve(self.pos)?;
-
-        // The target node is the node at the deepest resolved level.
-        // We need to find it in its parent's children and replace it.
-        let depth = resolved.depth;
-        if depth == 0 {
-            // Direct child of doc — use index to find it
-            let index = resolved.index(0);
-            let child = doc.child(index).ok_or(StepError::NoNodeAtPosition)?;
-            let new_child = child.with_attr(&self.attr, self.value.clone());
-            let new_content = doc.content().unwrap().replace_child(index, new_child);
-            let new_doc = doc.copy(|_| new_content.into_owned());
-            return Ok(new_doc);
-        }
-
-        // Walk from the deepest level up, rebuilding each level
-        let target = resolved.node(depth);
+        // Use node_at to find the target node, matching upstream JS behavior.
+        let target = doc.node_at(self.pos).ok_or(StepError::NoNodeAtPosition)?;
         let new_target = target.with_attr(&self.attr, self.value.clone());
 
-        // Rebuild parent chain bottom-up
-        let mut current_node = new_target;
-        for d in (1..=depth).rev() {
-            let parent = resolved.node(d - 1);
-            let child_idx = resolved.index(d);
-            let content = parent.content().unwrap();
-            let new_content = content.replace_child(child_idx, current_node);
-            current_node = parent.copy(|_| new_content.into_owned());
+        // Walk down from the doc to find the path to the target, then rebuild bottom-up.
+        // This mirrors the logic of node_at but records the path.
+        let mut path: Vec<(usize, S::Node)> = Vec::new();
+        let mut node: &S::Node = doc;
+        let mut pos = self.pos;
+        while let Some(content) = node.content() {
+            let idx = match content.find_index(pos, false) {
+                Ok(i) => i,
+                Err(_) => break,
+            };
+            let child = match content.maybe_child(idx.index) {
+                Some(c) => c,
+                None => break,
+            };
+            if idx.offset == pos || child.is_text() {
+                // This child is the target
+                path.push((idx.index, node.copy(|_| content.clone())));
+                break;
+            }
+            path.push((idx.index, node.copy(|_| content.clone())));
+            pos -= idx.offset + 1;
+            node = child;
         }
-        Ok(current_node)
+
+        if path.is_empty() {
+            // Target is the doc itself
+            return Ok(new_target);
+        }
+
+        // Rebuild bottom-up
+        let mut current = new_target;
+        for (child_idx, parent_copy) in path.into_iter().rev() {
+            let content = parent_copy.content().unwrap();
+            let new_content = content.replace_child(child_idx, current);
+            current = parent_copy.copy(|_| new_content.into_owned());
+        }
+        Ok(current)
     }
 }
 
@@ -99,6 +119,19 @@ impl DocAttrStep {
         Some(DocAttrStep {
             attr: self.attr.clone(),
             value: self.value.clone(),
+        })
+    }
+
+    /// Return the inverse of this step, restoring the original attribute value.
+    pub fn invert<S: Schema>(&self, doc: &S::Node) -> super::Step<S> {
+        let attrs = doc.attrs_json();
+        let old_value = attrs
+            .get(&self.attr)
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        super::Step::DocAttr(DocAttrStep {
+            attr: self.attr.clone(),
+            value: old_value,
         })
     }
 

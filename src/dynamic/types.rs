@@ -1,6 +1,7 @@
 //! Dynamic runtime types for nodes, marks, and their type descriptors.
 
-use crate::dynamic::content_expr::ContentExpr;
+use crate::dynamic::content_expr::{ContentExpr, ContentExprError};
+use crate::dynamic::schema::DynamicSchema;
 use crate::model::MarkType;
 use crate::model::{ContentMatch, Fragment, Mark, MarkSet, Node, NodeType, Schema, Text, TextNode};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -49,6 +50,12 @@ pub struct DynamicNodeTypeData {
     pub atom: bool,
     /// Whether this is isolating
     pub isolating: bool,
+    /// Whether this is a defining node
+    pub defining: bool,
+    /// Whether this node defines context for its content
+    pub defining_as_context: bool,
+    /// Whether this node is defining for its content
+    pub defining_for_content: bool,
     /// Whether this has required attributes
     pub has_required_attrs: bool,
     /// Whether this is a textblock
@@ -63,6 +70,8 @@ pub struct DynamicNodeTypeData {
     pub attrs: HashMap<String, serde_json::Value>,
     /// The set of allowed mark type names (None = all allowed)
     pub allowed_marks: Option<Vec<String>>,
+    /// Whitespace handling mode for this node type (e.g. "pre")
+    pub whitespace: Option<String>,
 }
 
 /// Runtime data for a dynamic mark type.
@@ -370,6 +379,112 @@ impl ContentMatch<Dyn> for DynamicContentMatch {
     }
 }
 
+/// A `ContentMatch`-like object created by parsing a content expression
+/// string against a specific schema's node types. Unlike `DynamicContentMatch`,
+/// this holds the parsed `ContentExpr` directly and does not rely on the
+/// global `DYN_TYPES` thread-local.
+#[derive(Clone)]
+pub struct ParsedContentMatch {
+    expr: ContentExpr,
+    schema: std::sync::Arc<DynamicSchema>,
+    state: usize,
+}
+
+impl fmt::Debug for ParsedContentMatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ParsedContentMatch")
+            .field("expr", &self.expr)
+            .field("state", &self.state)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ParsedContentMatch {
+    /// Parse a content expression string using the node types from the given schema.
+    pub fn parse(
+        expr_str: &str,
+        schema: &std::sync::Arc<DynamicSchema>,
+    ) -> Result<Self, ContentExprError> {
+        let mut groups: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for (group_name, indices) in schema.node_groups.iter() {
+            let names: Vec<String> = indices
+                .iter()
+                .map(|&i| schema.node_types[i].name.clone())
+                .collect();
+            groups.insert(group_name.clone(), names);
+        }
+
+        let expr = crate::dynamic::content_expr::parse_content_expr(expr_str, &groups)?;
+        Ok(ParsedContentMatch {
+            expr,
+            schema: schema.clone(),
+            state: 0,
+        })
+    }
+
+    /// Whether this match state represents a valid end of the content expression.
+    pub fn valid_end(&self) -> bool {
+        self.expr.valid_end(self.state)
+    }
+
+    /// Match a single node type, returning the next match state if successful.
+    pub fn match_type(&self, node_type: DynamicNodeType) -> Option<Self> {
+        let name = self.schema.node_types.get(node_type.idx)?.name.clone();
+        let next_state = self.expr.match_type(self.state, &name)?;
+        Some(ParsedContentMatch {
+            expr: self.expr.clone(),
+            schema: self.schema.clone(),
+            state: next_state,
+        })
+    }
+
+    /// Match a fragment of nodes, returning the final match state if successful.
+    pub fn match_fragment(&self, fragment: &Fragment<Dyn>) -> Option<Self> {
+        let mut state = self.state;
+        for i in 0..fragment.child_count() {
+            let child = fragment.child(i);
+            let name = self.schema.node_types.get(child.r#type().idx)?.name.clone();
+            state = self.expr.match_type(state, &name)?;
+        }
+        Some(ParsedContentMatch {
+            expr: self.expr.clone(),
+            schema: self.schema.clone(),
+            state,
+        })
+    }
+
+    /// Try to find a fragment of nodes that can be inserted before `after`
+    /// to make the content match.
+    pub fn fill_before(
+        &self,
+        after: &Fragment<Dyn>,
+        to_end: bool,
+        start_index: usize,
+    ) -> Option<Fragment<Dyn>> {
+        self.schema.with_types(|| {
+            with_types(|store| {
+                let mut seen = std::collections::HashSet::new();
+                seen.insert(self.state);
+                let mut types = Vec::new();
+                let result = fill_before_search(
+                    &self.expr,
+                    self.state,
+                    after,
+                    start_index,
+                    to_end,
+                    &mut seen,
+                    &mut types,
+                    store,
+                    0,
+                )?;
+                Some(Fragment::from(result))
+            })
+            .flatten()
+        })
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn fill_before_search(
     expr: &ContentExpr,
@@ -618,10 +733,18 @@ impl DynamicNode {
     }
 }
 
+fn attrs_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    match (a, b) {
+        (serde_json::Value::Null, serde_json::Value::Object(m)) if m.is_empty() => true,
+        (serde_json::Value::Object(m), serde_json::Value::Null) if m.is_empty() => true,
+        _ => a == b,
+    }
+}
+
 impl PartialEq for DynamicNode {
     fn eq(&self, other: &Self) -> bool {
         self.type_idx == other.type_idx
-            && self.attrs == other.attrs
+            && attrs_eq(&self.attrs, &other.attrs)
             && self.marks == other.marks
             && match (&self.inner, &other.inner) {
                 (DynNodeInner::Element { content: a }, DynNodeInner::Element { content: b }) => {
@@ -709,12 +832,19 @@ impl<'de> Deserialize<'de> for DynamicNode {
             marks_set.add(m);
         }
 
+        // Normalize missing/null attrs to an empty object, matching ProseMirror JS behavior
+        let attrs = if helper.attrs.is_null() {
+            serde_json::Value::Object(Default::default())
+        } else {
+            helper.attrs
+        };
+
         if let Some(text) = helper.text {
             let text_obj = Text::from(text);
             Ok(DynamicNode {
                 type_idx,
                 type_name: helper.type_name,
-                attrs: helper.attrs,
+                attrs: attrs.clone(),
                 marks: marks_set.clone(),
                 inner: DynNodeInner::Text(TextNode {
                     text: text_obj,
@@ -726,7 +856,7 @@ impl<'de> Deserialize<'de> for DynamicNode {
             Ok(DynamicNode {
                 type_idx,
                 type_name: helper.type_name,
-                attrs: helper.attrs,
+                attrs,
                 marks: marks_set,
                 inner: DynNodeInner::Element { content: frag },
             })
@@ -774,9 +904,16 @@ impl<'de> Deserialize<'de> for DynamicMark {
             }
         }
 
+        // Normalize missing/null attrs to an empty object, matching ProseMirror JS behavior
+        let attrs = if helper.attrs.is_null() {
+            serde_json::Value::Object(Default::default())
+        } else {
+            helper.attrs
+        };
+
         Ok(DynamicMark {
             type_name: helper.type_name,
-            attrs: helper.attrs,
+            attrs,
         })
     }
 }
@@ -824,14 +961,20 @@ impl DynamicMark {
 
 impl PartialEq for DynamicMark {
     fn eq(&self, other: &Self) -> bool {
-        self.type_name == other.type_name && self.attrs == other.attrs
+        self.type_name == other.type_name && attrs_eq(&self.attrs, &other.attrs)
     }
 }
 impl Eq for DynamicMark {}
 impl Hash for DynamicMark {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.type_name.hash(state);
-        self.attrs.hash(state);
+        // Normalize null to empty object for hashing consistency with eq
+        let normalized = if self.attrs.is_null() {
+            &serde_json::Value::Object(Default::default())
+        } else {
+            &self.attrs
+        };
+        normalized.hash(state);
     }
 }
 
@@ -946,6 +1089,42 @@ impl NodeType<Dyn> for DynamicNodeType {
     }
     fn inline_content(self) -> bool {
         with_types(|store| store.node_types[self.idx].has_inline_content).unwrap_or(false)
+    }
+    fn is_defining(self) -> bool {
+        with_types(|store| {
+            store
+                .node_types
+                .get(self.idx)
+                .is_some_and(|node_type| node_type.defining)
+        })
+        .unwrap_or(false)
+    }
+    fn is_defining_as_context(self) -> bool {
+        with_types(|store| {
+            store
+                .node_types
+                .get(self.idx)
+                .is_some_and(|node_type| node_type.defining_as_context)
+        })
+        .unwrap_or(false)
+    }
+    fn is_defining_for_content(self) -> bool {
+        with_types(|store| {
+            store
+                .node_types
+                .get(self.idx)
+                .is_some_and(|node_type| node_type.defining_for_content)
+        })
+        .unwrap_or(false)
+    }
+    fn whitespace(self) -> Option<String> {
+        with_types(|store| {
+            store
+                .node_types
+                .get(self.idx)
+                .and_then(|node_type| node_type.whitespace.clone())
+        })
+        .flatten()
     }
 
     fn create_node(

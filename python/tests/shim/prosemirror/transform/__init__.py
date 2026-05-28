@@ -31,9 +31,18 @@ def can_split(doc, pos, depth=None, types_after=None):
     return _can_split(doc, pos, depth, types_after)
 
 
-def find_wrapping(range, node_type):
+def find_wrapping(range, node_type, attrs=None, inner_range=None):
     node_type = _unwrap_node_type(node_type)
-    return _find_wrapping(range, node_type)
+    wrappers = _find_wrapping(range, node_type)
+    if wrappers is None:
+        return None
+    result = []
+    for i, w in enumerate(wrappers):
+        # The middle wrapper (target type) gets the provided attrs;
+        # outer/inner wrappers get empty attrs, matching JS withAttrs.
+        wrapper_attrs = attrs if i == len(wrappers) // 2 else None
+        result.append(NodeTypeWithAttrs(type=w, attrs=wrapper_attrs))
+    return result
 
 
 # lift_target doesn't take node types, so pass through
