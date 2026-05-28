@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "prosemirror"
-version = "0.3.9"
+version = "0.3.10"
 authors = [
     "Johannes Wilm <johannes@fiduswriter.org>",
     "Mustafa J <mustafa.0x@gmail.com>",
