@@ -4,12 +4,11 @@ use pyo3::types::{PyDict, PyList};
 use std::sync::Arc;
 
 use crate::model::{
-    json_to_py, py_to_json, PyFragment, PyMark, PyMarkType, PyNode, PyNodeRange, PyNodeType,
-    PyResolvedPos, PySchema,
+    json_to_py, py_to_json, PyMark, PyMarkType, PyNode, PyNodeRange, PyNodeType, PySchema,
 };
 use prosemirror::dynamic::types::{Dyn, DynamicNode, DynamicNodeType};
 use prosemirror::dynamic::DynamicSchema;
-use prosemirror::model::{Mark, MarkSet, Node, NodeType as _, Schema, Slice};
+use prosemirror::model::{Mark, MarkSet, Node};
 use prosemirror::transform::{
     map::{MapResult, Mappable, Mapping, StepMap},
     structure::{

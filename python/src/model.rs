@@ -241,7 +241,7 @@ impl PySchema {
                 dict.set_item(name, nt)?;
             }
             Ok::<_, PyErr>(())
-        });
+        })?;
         Ok(dict.unbind())
     }
 
@@ -258,7 +258,7 @@ impl PySchema {
                 dict.set_item(name, mt)?;
             }
             Ok::<_, PyErr>(())
-        });
+        })?;
         Ok(dict.unbind())
     }
 
