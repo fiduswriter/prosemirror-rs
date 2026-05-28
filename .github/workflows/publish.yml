@@ -29,7 +29,18 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64
-            manylinux: off
+            manylinux: 2_28
+            extra-args: --features pyo3/abi3-py310
+            before-build-linux: |
+              for py in /opt/python/cp310-cp310/bin/python3.10 \
+                        /opt/python/cp39-cp39/bin/python3.9 \
+                        /opt/python/cp38-cp38/bin/python3.8; do
+                if [ -x "$py" ]; then
+                  mkdir -p /usr/local/bin
+                  ln -sf "$py" /usr/local/bin/python3
+                  break
+                fi
+              done
           - os: ubuntu-latest
             target: aarch64
             # No Python interpreter is available in the aarch64 manylinux
@@ -58,6 +69,7 @@ jobs:
           args: --release --out dist ${{ matrix.extra-args }}
           sccache: 'true'
           manylinux: ${{ matrix.manylinux || 'auto' }}
+          before-build-linux: ${{ matrix.before-build-linux }}
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v7
