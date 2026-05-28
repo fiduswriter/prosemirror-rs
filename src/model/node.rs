@@ -1,6 +1,6 @@
 use super::{
-    replace, util, ContentMatch, ContentMatchError, Fragment, Mark, MarkSet, ReplaceError,
-    ResolveErr, ResolvedPos, Schema, Slice, TextNode,
+    replace, util, ContentMatch, ContentMatchError, Fragment, Mark, MarkSet, MarkType,
+    ReplaceError, ResolveErr, ResolvedPos, Schema, Slice, TextNode,
 };
 use displaydoc::Display;
 use serde::{Deserialize, Serialize, Serializer};
@@ -74,6 +74,12 @@ pub trait NodeType<S: Schema>: Copy + Clone + Debug + PartialEq + Eq {
     /// Whether this node type has required attributes (no defaults)
     fn has_required_attrs(self) -> bool {
         false
+    }
+
+    /// Validate that the given attribute values conform to this type's spec.
+    /// Returns Ok(()) or an error string.
+    fn check_attrs(self, _attrs: &serde_json::Value) -> Result<(), String> {
+        Ok(())
     }
 
     /// Whitespace handling mode for this node type (e.g. "pre")
@@ -562,6 +568,7 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
 
     /// Validate the content of this node against the schema. Returns Ok(()) or an error.
     fn check(&self) -> Result<(), String> {
+        self.r#type().check_attrs(&self.attrs_json())?;
         if let Some(c) = self.content() {
             if !self.r#type().valid_content(c) {
                 return Err(format!("Invalid content for node {}", self.r#type().name()));
@@ -571,8 +578,16 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
             }
         }
         if let Some(marks) = self.marks() {
-            if !self.r#type().allow_marks(marks) {
-                return Err(format!("Invalid marks for node {}", self.r#type().name()));
+            let mut rebuilt = MarkSet::new();
+            for mark in marks.iter() {
+                rebuilt.add(mark);
+                mark.r#type().check_attrs(&mark.attrs_json())?;
+            }
+            if rebuilt != *marks {
+                return Err(format!(
+                    "Invalid collection of marks for node {}",
+                    self.r#type().name()
+                ));
             }
         }
         Ok(())

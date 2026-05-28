@@ -68,6 +68,8 @@ pub struct DynamicNodeTypeData {
     pub groups: Vec<String>,
     /// Attribute names with their defaults
     pub attrs: HashMap<String, serde_json::Value>,
+    /// Attribute validators: attr name -> expected type string (e.g. "string|null")
+    pub attr_validators: HashMap<String, String>,
     /// The set of allowed mark type names (None = all allowed)
     pub allowed_marks: Option<Vec<String>>,
     /// Whitespace handling mode for this node type (e.g. "pre")
@@ -81,6 +83,8 @@ pub struct DynamicMarkTypeData {
     pub name: String,
     /// Attribute names with their defaults
     pub attrs: HashMap<String, serde_json::Value>,
+    /// Attribute validators: attr name -> expected type string (e.g. "string|null")
+    pub attr_validators: HashMap<String, String>,
     /// Whether this mark is inclusive
     pub inclusive: bool,
     /// Which other mark types this one excludes (raw names from spec)
@@ -153,6 +157,61 @@ impl Hash for DynamicMarkType {
         self.idx.hash(state);
     }
 }
+
+/// Return the ProseMirror-style type name for a JSON value
+/// (used by attribute validation).
+fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "object",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+/// Validate attribute values against a type's spec.
+/// `spec_attrs` — the declared attributes with defaults.
+/// `validators` — attr name -> expected type string (e.g. "string|null").
+/// `attrs` — the actual values on the node/mark.
+/// `type_kind` — "node" or "mark".
+/// `type_name` — the type's name (e.g. "image").
+pub fn check_attrs_helper(
+    spec_attrs: &std::collections::HashMap<String, serde_json::Value>,
+    validators: &std::collections::HashMap<String, String>,
+    attrs: &serde_json::Value,
+    type_kind: &str,
+    type_name: &str,
+) -> Result<(), String> {
+    let obj = match attrs.as_object() {
+        Some(o) => o,
+        None => return Ok(()),
+    };
+    // Check for unsupported attributes
+    for (key, _) in obj {
+        if !spec_attrs.contains_key(key) {
+            return Err(format!(
+                "Unsupported attribute {} for {} of type {}",
+                key, type_kind, type_name
+            ));
+        }
+    }
+    // Check validators
+    for (attr_name, expected) in validators {
+        let value = obj.get(attr_name).unwrap_or(&serde_json::Value::Null);
+        let actual = json_type_name(value);
+        let types: Vec<&str> = expected.split('|').collect();
+        if !types.contains(&actual) {
+            return Err(format!(
+                "Expected value of type {} for attribute {} on type {}, got {}",
+                expected, attr_name, type_name, actual
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl MarkType for DynamicMarkType {
     fn rank(self) -> usize {
         self.idx
@@ -176,6 +235,16 @@ impl MarkType for DynamicMarkType {
                 .unwrap_or(true)
         })
         .unwrap_or(true)
+    }
+    fn check_attrs(self, attrs: &serde_json::Value) -> Result<(), String> {
+        with_types(|store| {
+            if let Some(mt) = store.mark_types.get(self.idx) {
+                check_attrs_helper(&mt.attrs, &mt.attr_validators, attrs, "mark", &mt.name)
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_or(Ok(()))
     }
 }
 
@@ -1020,11 +1089,19 @@ impl NodeType<Dyn> for DynamicNodeType {
     fn valid_content(self, fragment: &Fragment<Dyn>) -> bool {
         with_types(|store| {
             let expr = &store.content_exprs[store.node_types[self.idx].content_expr_idx];
+            let nt = &store.node_types[self.idx];
             let mut state = 0;
             for child in fragment.children() {
                 match expr.match_type(state, &store.node_types[child.r#type().idx].name) {
                     Some(next) => state = next,
                     None => return false,
+                }
+                if let Some(allowed) = &nt.allowed_marks {
+                    for mark in child.marks().unwrap_or(&MarkSet::new()).iter() {
+                        if !allowed.contains(&store.mark_types[mark.r#type().idx].name) {
+                            return false;
+                        }
+                    }
                 }
             }
             expr.valid_end(state)
@@ -1157,6 +1234,17 @@ impl NodeType<Dyn> for DynamicNodeType {
         .flatten()
     }
 
+    fn check_attrs(self, attrs: &serde_json::Value) -> Result<(), String> {
+        with_types(|store| {
+            if let Some(nt) = store.node_types.get(self.idx) {
+                check_attrs_helper(&nt.attrs, &nt.attr_validators, attrs, "node", &nt.name)
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_or(Ok(()))
+    }
+
     fn create_node(
         self,
         content: Option<&Fragment<Dyn>>,
@@ -1212,6 +1300,10 @@ impl Mark<Dyn> for DynamicMark {
             DynamicMarkType { idx: 0 }
         })
         .unwrap_or(DynamicMarkType { idx: 0 })
+    }
+
+    fn attrs_json(&self) -> serde_json::Value {
+        self.attrs.clone()
     }
 }
 

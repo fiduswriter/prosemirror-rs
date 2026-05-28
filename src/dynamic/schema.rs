@@ -114,6 +114,9 @@ pub struct AttributeSpec {
     /// The default value for this attribute
     #[serde(default)]
     pub default: Option<serde_json::Value>,
+    /// Expected type(s) for this attribute, e.g. `"string"` or `"string|null"`
+    #[serde(default)]
+    pub validate: Option<String>,
 }
 
 /// Specification for a single mark type.
@@ -260,7 +263,13 @@ impl DynamicSchema {
                 Some("_") => None,
                 Some("") => Some(Vec::new()),
                 Some(marks) => Some(split_space_separated_names(marks)),
-                None => None,
+                None => {
+                    if has_inline_content {
+                        None
+                    } else {
+                        Some(Vec::new())
+                    }
+                }
             };
             let attrs = node_spec
                 .attrs
@@ -272,6 +281,17 @@ impl DynamicSchema {
                                 k.clone(),
                                 v.default.clone().unwrap_or(serde_json::Value::Null),
                             )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let attr_validators: HashMap<String, String> = node_spec
+                .attrs
+                .as_ref()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|(k, v)| {
+                            v.validate.as_ref().map(|val| (k.clone(), val.clone()))
                         })
                         .collect()
                 })
@@ -304,6 +324,7 @@ impl DynamicSchema {
                 content_expr_idx,
                 groups: groups_list,
                 attrs,
+                attr_validators,
                 allowed_marks,
                 whitespace: node_spec.whitespace.clone(),
             });
@@ -328,6 +349,17 @@ impl DynamicSchema {
                         .collect()
                 })
                 .unwrap_or_default();
+            let attr_validators: HashMap<String, String> = mark_spec
+                .attrs
+                .as_ref()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|(k, v)| {
+                            v.validate.as_ref().map(|val| (k.clone(), val.clone()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             let groups_list: Vec<String> = mark_spec
                 .group
                 .split(' ')
@@ -341,6 +373,7 @@ impl DynamicSchema {
             mark_types_data.push(DynamicMarkTypeData {
                 name: name.clone(),
                 attrs,
+                attr_validators,
                 inclusive: mark_spec.inclusive,
                 excludes: Vec::new(),
                 excluded: Vec::new(),
@@ -817,5 +850,60 @@ mod tests {
             assert_eq!(doc.child(0).unwrap().text_content(), "hello");
             assert_eq!(doc.child(1).unwrap().text_content(), "world");
         });
+    }
+}
+
+#[cfg(test)]
+mod test_validate {
+    use super::*;
+
+    #[test]
+    fn test_attr_validate_deser() {
+        let json = r#"{"nodes":{"doc":{"content":"image"},"image":{"inline":true,"attrs":{"src":{"validate":"string"},"alt":{"default":null}},"group":"inline"}},"marks":{}}"#;
+        let spec: SchemaSpec = serde_json::from_str(json).unwrap();
+        let img = spec.nodes.get("image").unwrap();
+        let src = img.attrs.as_ref().unwrap().get("src").unwrap();
+        assert_eq!(src.validate, Some("string".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod test_check_attrs {
+    use super::*;
+
+    #[test]
+    fn test_check_attrs_boolean_for_string() {
+        let json = r#"{"nodes":{"doc":{"content":"image"},"image":{"inline":true,"attrs":{"src":{"validate":"string"},"alt":{"default":null}},"group":"inline"}},"marks":{}}"#;
+        let schema = DynamicSchema::from_json(&serde_json::from_str(json).unwrap()).unwrap();
+        let img_type = schema.node_type_map.get("image").copied().unwrap();
+        let node_type = DynamicNodeType { idx: img_type };
+        let result = schema.with_types(|| node_type.check_attrs(&serde_json::json!({"src": true})));
+        assert!(result.is_err(), "expected error but got {:?}", result);
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Expected value of type"),
+            "unexpected error: {}",
+            err
+        );
+    }
+}
+
+#[cfg(test)]
+mod test_node_check_validate {
+    use super::*;
+    use crate::dynamic::types::DynamicNodeType;
+    use crate::model::Node;
+
+    #[test]
+    fn test_node_check_with_validate() {
+        let json = r#"{"nodes":{"doc":{"content":"image"},"image":{"inline":true,"attrs":{"src":{"validate":"string"},"alt":{"default":null},"title":{"default":null}},"group":"inline"}},"marks":{}}"#;
+        let schema = DynamicSchema::from_json(&serde_json::from_str(json).unwrap()).unwrap();
+        let img_type = schema.node_type_map.get("image").copied().unwrap();
+        let node_type = DynamicNodeType { idx: img_type };
+        let node =
+            schema.with_types(|| node_type.create(serde_json::json!({"src": true}), None, None));
+        let result = schema.with_types(|| node.check());
+        println!("check result: {:?}", result);
+        assert!(result.is_err());
     }
 }

@@ -147,6 +147,11 @@ pub trait Mark<S: Schema<Mark = Self>>:
     /// The type of this mark.
     fn r#type(&self) -> S::MarkType;
 
+    /// The attributes of this mark as JSON.
+    fn attrs_json(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+
     /// Check if a mark of this type is in the given set
     fn is_in_set(&self, set: &MarkSet<S>) -> bool {
         set.content.iter().any(|m| m == self)

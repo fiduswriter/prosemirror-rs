@@ -21,7 +21,11 @@ _test_schema = Schema(
             "text": {"group": "inline"},
             "image": {
                 "inline": True,
-                "attrs": {"src": {}, "alt": {"default": None}, "title": {"default": None}},
+                "attrs": {
+                    "src": {"validate": "string"},
+                    "alt": {"default": None},
+                    "title": {"default": None},
+                },
                 "group": "inline",
             },
             "hard_break": {"inline": True, "group": "inline"},

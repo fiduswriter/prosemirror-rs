@@ -1,8 +1,16 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use pyo3::exceptions::{PyAttributeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyString};
+
+// Global registry mapping DynamicSchema pointer addresses to their raw
+// Python spec dicts (with callables intact).  This allows any PySchema
+// wrapper — including those created via from_arc — to access the original
+// spec values needed for toDebugString / leafText.
+static SCHEMA_RAW_SPECS: std::sync::LazyLock<Mutex<HashMap<usize, Py<PyAny>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 use prosemirror::dynamic::types::{
     Dyn, DynamicMark, DynamicMarkType, DynamicNode, DynamicNodeType, ParsedContentMatch,
@@ -177,10 +185,18 @@ pub struct PySchema {
 
 impl PySchema {
     pub(crate) fn from_arc(arc: Arc<DynamicSchema>) -> Self {
+        let ptr = Arc::as_ptr(&arc) as usize;
+        let raw_spec = Python::attach(|py| {
+            SCHEMA_RAW_SPECS
+                .lock()
+                .unwrap()
+                .get(&ptr)
+                .map(|r| r.clone_ref(py))
+        });
         Self {
             inner: arc,
             spec: serde_json::Value::Null,
-            raw_spec: None,
+            raw_spec,
         }
     }
 }
@@ -194,11 +210,22 @@ impl PySchema {
         let json = py_to_json(&stripped)?;
         let schema = DynamicSchema::from_json(&json)
             .map_err(|e| PyValueError::new_err(format!("Invalid schema: {e}")))?;
+        let arc = Arc::new(schema);
+        let ptr = Arc::as_ptr(&arc) as usize;
+        SCHEMA_RAW_SPECS
+            .lock()
+            .unwrap()
+            .insert(ptr, spec.clone().unbind());
         Ok(PySchema {
-            inner: Arc::new(schema),
+            inner: arc,
             spec: json,
             raw_spec: Some(spec.clone().unbind()),
         })
+    }
+
+    #[getter]
+    fn raw_spec(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.raw_spec.as_ref().map(|r| r.clone_ref(py))
     }
 
     #[getter]

@@ -137,4 +137,9 @@ pub trait MarkType: Copy + Clone + Debug + PartialEq + Eq + PartialOrd + Ord {
     fn inclusive(self) -> bool {
         true
     }
+    /// Validate that the given attribute values conform to this mark type's spec.
+    /// Returns Ok(()) or an error string.
+    fn check_attrs(self, _attrs: &serde_json::Value) -> Result<(), String> {
+        Ok(())
+    }
 }

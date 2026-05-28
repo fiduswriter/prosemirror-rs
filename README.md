@@ -281,14 +281,11 @@ cd python
 maturin develop
 PYTHONPATH=tests/shim pytest tests/upstream/ \
   --ignore=tests/upstream/test_dom.py \
-  --ignore=tests/upstream/test_node.py \
   -v
 ```
 
 > **Note:** `test_dom.py` is skipped because DOM parsing/serialization is out
-> of scope for the server-side crate. `test_node.py` is skipped because it
-> constructs schemas with Python callable values (`leafText`, `toDebugString`)
-> that the current PyO3 bindings do not yet support.
+> of scope for the server-side crate.
 
 **Current upstream Python results** (run against the Rust shim):
 
@@ -304,9 +301,9 @@ PYTHONPATH=tests/shim pytest tests/upstream/ \
 | `test_step.py` | 19 | 19 | 0 |
 | `test_mark.py` | 21 | 21 | 0 |
 | `test_content.py` | 62 | 62 | 0 |
-| `test_node.py` | 40 | 31 | 9 |
-| `test_trans.py` | 164 | 164 | 0 |
-| **Total** | **456** | **447** | **9** |
+| `test_node.py` | 40 | 40 | 0 |
+| `test_trans.py` | 164 | 161 | 3 |
+| **Total** | **456** | **453** | **3** |
 
 ### Python-generated fixtures
 
