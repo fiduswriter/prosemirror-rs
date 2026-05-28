@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use pyo3::exceptions::{PyAttributeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyString};
+use pyo3::types::{PyDict, PyList};
 
 // Global registry mapping DynamicSchema pointer addresses to their raw
 // Python spec dicts (with callables intact).  This allows any PySchema
@@ -65,8 +65,8 @@ pub fn py_to_json(obj: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
         serde_json::Number::from_f64(f)
             .map(serde_json::Value::Number)
             .ok_or_else(|| PyValueError::new_err("Invalid float for JSON"))
-    } else if let Ok(s) = obj.cast::<PyString>() {
-        Ok(serde_json::Value::String(s.to_str()?.to_string()))
+    } else if let Ok(s) = obj.extract::<String>() {
+        Ok(serde_json::Value::String(s))
     } else if let Ok(list) = obj.cast::<PyList>() {
         let mut arr = Vec::new();
         for item in list.iter() {
@@ -76,7 +76,7 @@ pub fn py_to_json(obj: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     } else if let Ok(dict) = obj.cast::<PyDict>() {
         let mut map = serde_json::Map::new();
         for (k, v) in dict.iter() {
-            let key = k.cast::<PyString>()?.to_str()?.to_string();
+            let key = k.extract::<String>()?;
             map.insert(key, py_to_json(&v)?);
         }
         Ok(serde_json::Value::Object(map))
