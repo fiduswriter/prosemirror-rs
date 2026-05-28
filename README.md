@@ -279,31 +279,10 @@ the Rust implementation through a thin compatibility shim
 ```bash
 cd python
 maturin develop
-PYTHONPATH=tests/shim pytest tests/upstream/ \
-  --ignore=tests/upstream/test_dom.py \
-  -v
+PYTHONPATH=tests/shim pytest tests/upstream/ -v
 ```
 
-> **Note:** `test_dom.py` is skipped because DOM parsing/serialization is out
-> of scope for the server-side crate.
-
-**Current upstream Python results** (run against the Rust shim):
-
-| File | Total | Passed | Failed |
-|---|---|---|---|
-| `test_slice.py` | 20 | 20 | 0 |
-| `test_resolve.py` | 27 | 27 | 0 |
-| `test_mapping.py` | 23 | 23 | 0 |
-| `test_replace.py` | 22 | 22 | 0 |
-| `test_diff.py` | 18 | 18 | 0 |
-| `test_structure.py` | 38 | 38 | 0 |
-| `test_replace_step.py` | 2 | 2 | 0 |
-| `test_step.py` | 19 | 19 | 0 |
-| `test_mark.py` | 21 | 21 | 0 |
-| `test_content.py` | 62 | 62 | 0 |
-| `test_node.py` | 40 | 40 | 0 |
-| `test_trans.py` | 164 | 164 | 0 |
-| **Total** | **456** | **456** | **0** |
+> **Note:** `test_dom.py` was removed because DOM serialization is out of scope for this project.
 
 ### Python-generated fixtures
 
