@@ -466,8 +466,29 @@ impl<S: Schema> Serialize for Fragment<S> {
 
 impl<S: Schema> From<Vec<S::Node>> for Fragment<S> {
     fn from(src: Vec<S::Node>) -> Fragment<S> {
-        let size = src.iter().map(|x| x.node_size()).sum::<usize>();
-        Fragment { inner: src, size }
+        let mut joined: Vec<S::Node> = Vec::new();
+        let mut size = 0;
+        for node in src {
+            size += node.node_size();
+            if let Some(last) = joined.last_mut() {
+                if let Some(last_text) = last.text_node() {
+                    if let Some(node_text) = node.text_node() {
+                        if last_text.same_markup(&node).is_some() {
+                            let combined = last_text.with_text(Text::from(
+                                last_text.text.as_str().to_owned() + node_text.text.as_str(),
+                            ));
+                            *last = S::Node::new_text_node(combined);
+                            continue;
+                        }
+                    }
+                }
+            }
+            joined.push(node);
+        }
+        Fragment {
+            inner: joined,
+            size,
+        }
     }
 }
 
