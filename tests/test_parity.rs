@@ -83,7 +83,7 @@ fn apply_operation(
         }
         "split" => {
             let pos = case["pos"].as_u64().unwrap() as usize;
-            tr.split(pos, None, None);
+            tr.split(pos, None, None).unwrap();
         }
         "replaceAround" => {
             let step: prosemirror::transform::Step<Dyn> =

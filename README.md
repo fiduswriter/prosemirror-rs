@@ -305,8 +305,8 @@ PYTHONPATH=tests/shim pytest tests/upstream/ \
 | `test_mark.py` | 21 | 21 | 0 |
 | `test_content.py` | 62 | 62 | 0 |
 | `test_node.py` | 40 | 31 | 9 |
-| `test_trans.py` | 164 | 158 | 6 |
-| **Total** | **456** | **441** | **15** |
+| `test_trans.py` | 164 | 164 | 0 |
+| **Total** | **456** | **447** | **9** |
 
 ### Python-generated fixtures
 

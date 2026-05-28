@@ -238,12 +238,15 @@ impl DynamicSchema {
             }
         }
 
+        let node_type_names: std::collections::HashSet<String> =
+            spec.nodes.keys().cloned().collect();
+
         for (name, node_spec) in &spec.nodes {
             let idx = node_types_data.len();
             let content_expr = if node_spec.content.is_empty() {
                 ContentExpr::empty()
             } else {
-                content_expr::parse_content_expr(&node_spec.content, &groups)
+                content_expr::parse_content_expr(&node_spec.content, &groups, &node_type_names)
                     .map_err(DynamicSchemaError::ContentExpr)?
             };
             content_exprs.push(content_expr);
@@ -347,6 +350,7 @@ impl DynamicSchema {
 
         // Resolve exclusions
         let num_mark_types = mark_types_data.len();
+        let all_mark_names: Vec<String> = mark_types_data.iter().map(|d| d.name.clone()).collect();
         for data in mark_types_data.iter_mut() {
             let raw_excludes = match spec
                 .marks
@@ -355,6 +359,7 @@ impl DynamicSchema {
             {
                 Some("") => Vec::new(),
                 Some("_") => {
+                    data.excludes = all_mark_names.clone();
                     data.excluded = (0..num_mark_types).collect();
                     continue;
                 }
@@ -620,10 +625,10 @@ mod tests {
         assert_eq!(
             comment_data.excludes,
             vec![
-                "comment".to_string(),
+                "strong".to_string(),
                 "em".to_string(),
                 "link".to_string(),
-                "strong".to_string()
+                "comment".to_string()
             ]
         );
 

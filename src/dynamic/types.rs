@@ -441,7 +441,11 @@ impl ParsedContentMatch {
             groups.insert(group_name.clone(), names);
         }
 
-        let expr = crate::dynamic::content_expr::parse_content_expr(expr_str, &groups)?;
+        let node_type_names: std::collections::HashSet<String> =
+            schema.node_types.iter().map(|nt| nt.name.clone()).collect();
+
+        let expr =
+            crate::dynamic::content_expr::parse_content_expr(expr_str, &groups, &node_type_names)?;
         Ok(ParsedContentMatch {
             expr,
             schema: schema.clone(),

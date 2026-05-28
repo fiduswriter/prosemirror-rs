@@ -407,6 +407,30 @@ impl PyNodeType {
         Ok(ok)
     }
 
+    #[pyo3(signature = (attrs=None, content=None, marks=None))]
+    fn create_and_fill(
+        &self,
+        attrs: Option<&Bound<'_, PyAny>>,
+        content: Option<&Bound<'_, PyAny>>,
+        marks: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Option<PyNode>> {
+        let attrs = attrs
+            .map(py_to_json)
+            .unwrap_or(Ok(serde_json::Value::Null))?;
+        let content = content
+            .map(|c| extract_fragment(c, &self.schema))
+            .unwrap_or(Ok(Fragment::new()))?;
+        let marks = marks.map(extract_markset).unwrap_or(Ok(MarkSet::new()))?;
+        let node = self.schema.with_types(|| {
+            self.inner
+                .create_and_fill(attrs, Some(&content), Some(&marks))
+        });
+        Ok(node.map(|n| PyNode {
+            schema: self.schema.clone(),
+            inner: n,
+        }))
+    }
+
     fn __str__(&self) -> String {
         self.name.clone()
     }

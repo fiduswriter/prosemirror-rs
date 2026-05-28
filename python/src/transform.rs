@@ -533,14 +533,60 @@ impl PyTransform {
         slf: &Bound<'_, Self>,
         from: usize,
         to: usize,
-        mark: Option<&PyMark>,
+        mark: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<Self>> {
-        let mark = mark.map(|m| m.inner.clone());
-        {
+        let schema = slf.borrow().schema.clone();
+        if let Some(mark_any) = mark {
+            if let Ok(mark_type) = mark_any.cast::<crate::model::PyMarkType>() {
+                let target_idx = mark_type.borrow().inner.idx;
+                let marks_to_remove: Vec<crate::model::PyMark> = {
+                    let this = slf.borrow();
+                    schema.with_types(|| {
+                        let mut seen = std::collections::HashSet::new();
+                        let mut result = Vec::new();
+                        this.inner.doc.nodes_between(
+                            from,
+                            to,
+                            &mut |node, _pos| {
+                                if let Some(node_marks) = node.marks() {
+                                    for m in node_marks.iter() {
+                                        if m.r#type().idx == target_idx {
+                                            let py_mark = crate::model::PyMark {
+                                                schema: this.schema.clone(),
+                                                inner: m.clone(),
+                                            };
+                                            if seen.insert(py_mark.inner.clone()) {
+                                                result.push(py_mark);
+                                            }
+                                        }
+                                    }
+                                }
+                                !node.is_inline()
+                            },
+                            0,
+                        );
+                        result
+                    })
+                };
+                for mark in marks_to_remove {
+                    let mut this = slf.borrow_mut();
+                    schema.with_types(|| {
+                        this.inner.remove_mark(from, to, Some(mark.inner));
+                    });
+                }
+            } else if let Ok(mark) = mark_any.cast::<crate::model::PyMark>() {
+                let mut this = slf.borrow_mut();
+                schema.with_types(|| {
+                    this.inner
+                        .remove_mark(from, to, Some(mark.borrow().inner.clone()));
+                });
+            } else {
+                return Err(PyValueError::new_err("mark must be a Mark or MarkType"));
+            }
+        } else {
             let mut this = slf.borrow_mut();
-            let schema = this.schema.clone();
             schema.with_types(|| {
-                this.inner.remove_mark(from, to, mark);
+                this.inner.remove_mark(from, to, None);
             });
         }
         Ok(slf.clone().unbind())
@@ -655,18 +701,29 @@ impl PyTransform {
         let types_after = types_after.map(|list| {
             list.iter()
                 .map(|item: Bound<'_, PyAny>| {
-                    let nt = item.cast::<PyNodeType>().unwrap().borrow();
-                    DynamicNodeType { idx: nt.inner.idx }
+                    // Handle either a raw NodeType or a NodeTypeWithAttrs wrapper
+                    let nt = if let Ok(py_nt) = item.cast::<PyNodeType>() {
+                        py_nt.borrow().inner.clone()
+                    } else {
+                        // Try to get `.type` attribute from NodeTypeWithAttrs
+                        let type_attr = item.getattr("type")
+                            .map_err(|e| PyValueError::new_err(format!("types_after items must be NodeType or NodeTypeWithAttrs: {e}")))?;
+                        type_attr.cast::<PyNodeType>()
+                            .map_err(|e| PyValueError::new_err(format!("types_after items must be NodeType or NodeTypeWithAttrs: {e}")))?
+                            .borrow().inner.clone()
+                    };
+                    Ok::<_, PyErr>(nt)
                 })
-                .collect::<Vec<_>>()
-        });
+                .collect::<PyResult<Vec<_>>>()
+        }).transpose()?;
         let types_after_ref = types_after.as_deref();
         {
             let mut this = slf.borrow_mut();
             let schema = this.schema.clone();
-            schema.with_types(|| {
-                this.inner.split(pos, depth, types_after_ref);
-            });
+            let result = schema.with_types(|| this.inner.split(pos, depth, types_after_ref));
+            if let Err(e) = result {
+                return Err(PyValueError::new_err(format!("{e:?}")));
+            }
         }
         Ok(slf.clone().unbind())
     }

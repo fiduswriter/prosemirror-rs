@@ -757,7 +757,7 @@ impl<S: Schema> Transform<S> {
     ///                       "content": [{"type": "text", "text": "foobar"}]}]
     ///     })).unwrap();
     ///     let mut tr: Transform<Dyn> = Transform::new(doc);
-    ///     tr.split(4, None, None); // split after "foo"
+    ///     tr.split(4, None, None).unwrap(); // split after "foo"
     ///     let a = tr.doc.child(0).unwrap().text_content();
     ///     let b = tr.doc.child(1).unwrap().text_content();
     ///     (a, b)
@@ -771,12 +771,12 @@ impl<S: Schema> Transform<S> {
         pos: usize,
         depth: Option<usize>,
         types_after: Option<&[S::NodeType]>,
-    ) -> &mut Self {
+    ) -> Result<&mut Self, StepError> {
         let depth = depth.unwrap_or(1);
-        let pos_ = match self.doc.resolve(pos) {
-            Ok(p) => p,
-            Err(_) => return self,
-        };
+        let pos_ = self
+            .doc
+            .resolve(pos)
+            .map_err(|e| StepError::ApplyFailed(format!("{e:?}")))?;
         let mut before = Fragment::new();
         let mut after = Fragment::new();
         let mut d = pos_.depth;
@@ -799,12 +799,12 @@ impl<S: Schema> Transform<S> {
             i -= 1;
         }
         let combined = before.append(after);
-        let _ = self.maybe_step(Step::Replace(ReplaceStep {
+        self.step(Step::Replace(ReplaceStep {
             span: crate::transform::Span { from: pos, to: pos },
             slice: Slice::new(combined, depth, depth),
             structure: true,
-        }));
-        self
+        }))?;
+        Ok(self)
     }
 
     /// Join nodes at the given position.

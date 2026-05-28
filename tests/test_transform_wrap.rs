@@ -175,7 +175,7 @@ fn test_content_expr() {
         vec!["paragraph".to_string(), "ordered_list".to_string()],
     );
 
-    let expr = parse_content_expr("block+", &groups).unwrap();
+    let expr = parse_content_expr("block+", &groups, &std::collections::HashSet::new()).unwrap();
     println!("states: {}", expr.states.len());
     for (i, state) in expr.states.iter().enumerate() {
         println!(

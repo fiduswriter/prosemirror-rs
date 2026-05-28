@@ -43,15 +43,6 @@ def _mark_same_set(a, b):
 Mark.same_set = staticmethod(_mark_same_set)
 
 
-def _node_type_create_and_fill(self, attrs=None, content=None, marks=None):
-    # Stub: returns None so tests can at least collect.
-    # Real implementation needs ContentMatch which is not yet exposed.
-    return None
-
-
-NodeType.create_and_fill = _node_type_create_and_fill
-
-
 def _node_type_create_checked(self, attrs=None, content=None, marks=None):
     node = self.create(attrs, content, marks)
     node.check()

@@ -6,7 +6,7 @@
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A compiled content expression DFA.
 ///
@@ -64,10 +64,6 @@ enum ExprAtom {
     Name(String),
     /// A group of node types
     Group(String),
-    /// Any inline node
-    Inline,
-    /// Any block node
-    Block,
     /// A parenthesized sub-expression (alternatives of sequences)
     Nested(Vec<Vec<ExprElement>>),
 }
@@ -213,9 +209,11 @@ impl Lexer {
 ///
 /// The `groups` map should map group names to the set of node type names in
 /// each group.
+/// The `node_types` set should contain all valid node type names.
 pub fn parse_content_expr(
     input: &str,
     groups: &HashMap<String, Vec<String>>,
+    node_types: &HashSet<String>,
 ) -> Result<ContentExpr, ContentExprError> {
     let input = input.trim();
     if input.is_empty() {
@@ -229,7 +227,7 @@ pub fn parse_content_expr(
     }
 
     let mut lexer = Lexer::new(input);
-    let alternatives = parse_expr(&mut lexer, groups)?;
+    let alternatives = parse_expr(&mut lexer, groups, node_types)?;
     match lexer.next_token()? {
         Token::Eof => {}
         Token::CloseParen => return Err(ContentExprError::MismatchedParens),
@@ -237,7 +235,7 @@ pub fn parse_content_expr(
     }
 
     // Build NFA then convert to DFA
-    let nfa = build_nfa(&alternatives, groups)?;
+    let nfa = build_nfa(&alternatives, groups, node_types)?;
     let dfa = nfa_to_dfa(&nfa);
     Ok(dfa)
 }
@@ -245,14 +243,15 @@ pub fn parse_content_expr(
 fn parse_expr(
     lexer: &mut Lexer,
     groups: &HashMap<String, Vec<String>>,
+    node_types: &HashSet<String>,
 ) -> Result<Vec<Vec<ExprElement>>, ContentExprError> {
     let mut alternatives = Vec::new();
-    alternatives.push(parse_nonempty_sequence(lexer, groups)?);
+    alternatives.push(parse_nonempty_sequence(lexer, groups, node_types)?);
 
     loop {
         match lexer.next_token()? {
             Token::Pipe => {
-                alternatives.push(parse_nonempty_sequence(lexer, groups)?);
+                alternatives.push(parse_nonempty_sequence(lexer, groups, node_types)?);
             }
             Token::Eof => break,
             Token::CloseParen => {
@@ -270,8 +269,9 @@ fn parse_expr(
 fn parse_nonempty_sequence(
     lexer: &mut Lexer,
     groups: &HashMap<String, Vec<String>>,
+    node_types: &HashSet<String>,
 ) -> Result<Vec<ExprElement>, ContentExprError> {
-    let sequence = parse_sequence(lexer, groups)?;
+    let sequence = parse_sequence(lexer, groups, node_types)?;
     if sequence.is_empty() {
         return Err(ContentExprError::EmptyExpr);
     }
@@ -281,30 +281,25 @@ fn parse_nonempty_sequence(
 fn parse_sequence(
     lexer: &mut Lexer,
     groups: &HashMap<String, Vec<String>>,
+    node_types: &HashSet<String>,
 ) -> Result<Vec<ExprElement>, ContentExprError> {
     let mut elements = Vec::new();
     loop {
         let saved = lexer.pos;
         match lexer.next_token()? {
             Token::Name(name) => {
-                let atom = match name.as_str() {
-                    "inline" => ExprAtom::Inline,
-                    "block" => ExprAtom::Block,
-                    _ => {
-                        if name.chars().next().is_some_and(|c| c.is_uppercase())
-                            || groups.contains_key(&name)
-                        {
-                            ExprAtom::Group(name)
-                        } else {
-                            ExprAtom::Name(name)
-                        }
-                    }
+                let atom = if node_types.contains(&name) {
+                    ExprAtom::Name(name)
+                } else if groups.contains_key(&name) {
+                    ExprAtom::Group(name)
+                } else {
+                    return Err(ContentExprError::UnknownRef(name));
                 };
                 let quantifier = parse_quantifier(lexer)?;
                 elements.push(ExprElement { atom, quantifier });
             }
             Token::OpenParen => {
-                let inner = parse_expr(lexer, groups)?;
+                let inner = parse_expr(lexer, groups, node_types)?;
                 match lexer.next_token()? {
                     Token::CloseParen => {}
                     _ => return Err(ContentExprError::MismatchedParens),
@@ -387,8 +382,9 @@ fn copy_nested_nfa(
     states: &mut Vec<NfaState>,
     nested_alts: &[Vec<ExprElement>],
     groups: &HashMap<String, Vec<String>>,
+    node_types: &HashSet<String>,
 ) -> Result<(usize, usize), ContentExprError> {
-    let nested_nfa = build_nfa(nested_alts, groups)?;
+    let nested_nfa = build_nfa(nested_alts, groups, node_types)?;
     let offset = states.len();
     for state in &nested_nfa {
         let mut state = state.clone();
@@ -424,6 +420,7 @@ fn copy_nested_nfa(
 fn build_nfa(
     alternatives: &[Vec<ExprElement>],
     groups: &HashMap<String, Vec<String>>,
+    node_types: &HashSet<String>,
 ) -> Result<Vec<NfaState>, ContentExprError> {
     let mut states = Vec::new();
 
@@ -445,12 +442,14 @@ fn build_nfa(
                 ExprAtom::Nested(nested_alts) => {
                     match elem.quantifier {
                         Quantifier::Once => {
-                            let (start, merge) = copy_nested_nfa(&mut states, nested_alts, groups)?;
+                            let (start, merge) =
+                                copy_nested_nfa(&mut states, nested_alts, groups, node_types)?;
                             states[current].epsilon.push(start);
                             current = merge;
                         }
                         Quantifier::Optional => {
-                            let (start, merge) = copy_nested_nfa(&mut states, nested_alts, groups)?;
+                            let (start, merge) =
+                                copy_nested_nfa(&mut states, nested_alts, groups, node_types)?;
                             let next = states.len();
                             states.push(NfaState {
                                 epsilon: Vec::new(),
@@ -463,7 +462,8 @@ fn build_nfa(
                             current = next;
                         }
                         Quantifier::Star => {
-                            let (start, merge) = copy_nested_nfa(&mut states, nested_alts, groups)?;
+                            let (start, merge) =
+                                copy_nested_nfa(&mut states, nested_alts, groups, node_types)?;
                             let next = states.len();
                             states.push(NfaState {
                                 epsilon: Vec::new(),
@@ -477,7 +477,8 @@ fn build_nfa(
                             current = next;
                         }
                         Quantifier::Plus => {
-                            let (start, merge) = copy_nested_nfa(&mut states, nested_alts, groups)?;
+                            let (start, merge) =
+                                copy_nested_nfa(&mut states, nested_alts, groups, node_types)?;
                             let next = states.len();
                             states.push(NfaState {
                                 epsilon: Vec::new(),
@@ -493,15 +494,19 @@ fn build_nfa(
                             let mut prev = current;
                             for _ in 0..min {
                                 let (start, merge) =
-                                    copy_nested_nfa(&mut states, nested_alts, groups)?;
+                                    copy_nested_nfa(&mut states, nested_alts, groups, node_types)?;
                                 states[prev].epsilon.push(start);
                                 prev = merge;
                             }
                             match max {
                                 Some(max) if max > min => {
                                     for _ in min..max {
-                                        let (start, merge) =
-                                            copy_nested_nfa(&mut states, nested_alts, groups)?;
+                                        let (start, merge) = copy_nested_nfa(
+                                            &mut states,
+                                            nested_alts,
+                                            groups,
+                                            node_types,
+                                        )?;
                                         let next = states.len();
                                         states.push(NfaState {
                                             epsilon: Vec::new(),
@@ -516,8 +521,12 @@ fn build_nfa(
                                     current = prev;
                                 }
                                 None => {
-                                    let (start, merge) =
-                                        copy_nested_nfa(&mut states, nested_alts, groups)?;
+                                    let (start, merge) = copy_nested_nfa(
+                                        &mut states,
+                                        nested_alts,
+                                        groups,
+                                        node_types,
+                                    )?;
                                     let next = states.len();
                                     states.push(NfaState {
                                         epsilon: Vec::new(),
@@ -687,28 +696,6 @@ fn resolve_atom(
                 "Nested expressions should be handled directly in build_nfa, not resolved to names"
             )
         }
-        ExprAtom::Inline => {
-            // Collect all inline types from groups
-            let mut names = Vec::new();
-            if let Some(inline) = groups.get("inline") {
-                names.extend(inline.iter().cloned());
-            }
-            if names.is_empty() {
-                // Fallback: treat as a group name
-                return Err(ContentExprError::UnknownRef("inline".to_string()));
-            }
-            Ok(names)
-        }
-        ExprAtom::Block => {
-            let mut names = Vec::new();
-            if let Some(block) = groups.get("block") {
-                names.extend(block.iter().cloned());
-            }
-            if names.is_empty() {
-                return Err(ContentExprError::UnknownRef("block".to_string()));
-            }
-            Ok(names)
-        }
     }
 }
 
@@ -838,7 +825,7 @@ mod tests {
 
     #[test]
     fn test_parse_empty() {
-        let expr = parse_content_expr("", &HashMap::new()).unwrap();
+        let expr = parse_content_expr("", &HashMap::new(), &HashSet::new()).unwrap();
         assert!(expr.valid_end(0));
         assert_eq!(expr.states.len(), 1);
     }
@@ -846,7 +833,9 @@ mod tests {
     #[test]
     fn test_empty_and_none_are_regular_node_names() {
         for name in ["empty", "none"] {
-            let expr = parse_content_expr(name, &HashMap::new()).unwrap();
+            let mut node_types = HashSet::new();
+            node_types.insert(name.to_string());
+            let expr = parse_content_expr(name, &HashMap::new(), &node_types).unwrap();
             assert!(!expr.valid_end(0));
             assert_eq!(expr.match_type(0, name), Some(1));
             assert!(expr.valid_end(1));
@@ -855,10 +844,13 @@ mod tests {
 
     #[test]
     fn test_parse_rejects_unconsumed_close_parens() {
+        let mut node_types = HashSet::new();
+        node_types.insert("paragraph".to_string());
+        node_types.insert("heading".to_string());
         for input in ["paragraph)", "paragraph heading)", "(paragraph))"] {
             assert!(
                 matches!(
-                    parse_content_expr(input, &HashMap::new()),
+                    parse_content_expr(input, &HashMap::new(), &node_types),
                     Err(ContentExprError::MismatchedParens)
                 ),
                 "expected {:?} to reject the unmatched trailing parenthesis",
@@ -869,6 +861,9 @@ mod tests {
 
     #[test]
     fn test_parse_rejects_empty_alternatives() {
+        let mut node_types = HashSet::new();
+        node_types.insert("paragraph".to_string());
+        node_types.insert("heading".to_string());
         for input in [
             "| paragraph",
             "paragraph |",
@@ -878,7 +873,7 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    parse_content_expr(input, &HashMap::new()),
+                    parse_content_expr(input, &HashMap::new(), &node_types),
                     Err(ContentExprError::EmptyExpr)
                 ),
                 "expected {:?} to reject empty alternatives",
@@ -889,7 +884,9 @@ mod tests {
 
     #[test]
     fn test_parse_single_type() {
-        let expr = parse_content_expr("paragraph", &HashMap::new()).unwrap();
+        let mut node_types = HashSet::new();
+        node_types.insert("paragraph".to_string());
+        let expr = parse_content_expr("paragraph", &HashMap::new(), &node_types).unwrap();
         assert_eq!(expr.states.len(), 2);
         assert!(!expr.valid_end(0));
         assert!(expr.valid_end(1));
@@ -904,7 +901,7 @@ mod tests {
             "block".to_string(),
             vec!["paragraph".to_string(), "heading".to_string()],
         );
-        let expr = parse_content_expr("block+", &groups).unwrap();
+        let expr = parse_content_expr("block+", &groups, &HashSet::new()).unwrap();
         assert!(!expr.valid_end(0));
         assert!(expr.match_type(0, "paragraph").is_some());
         assert!(expr.match_type(0, "heading").is_some());
@@ -917,14 +914,19 @@ mod tests {
 
     #[test]
     fn test_parse_star() {
-        let expr = parse_content_expr("paragraph*", &HashMap::new()).unwrap();
+        let mut node_types = HashSet::new();
+        node_types.insert("paragraph".to_string());
+        let expr = parse_content_expr("paragraph*", &HashMap::new(), &node_types).unwrap();
         assert!(expr.valid_end(0)); // star means zero is ok
         assert!(expr.match_type(0, "paragraph").is_some());
     }
 
     #[test]
     fn test_parse_sequence() {
-        let expr = parse_content_expr("paragraph heading", &HashMap::new()).unwrap();
+        let mut node_types = HashSet::new();
+        node_types.insert("paragraph".to_string());
+        node_types.insert("heading".to_string());
+        let expr = parse_content_expr("paragraph heading", &HashMap::new(), &node_types).unwrap();
         assert!(!expr.valid_end(0));
         let s1 = expr.match_type(0, "paragraph").unwrap();
         assert!(!expr.valid_end(s1));
@@ -934,7 +936,10 @@ mod tests {
 
     #[test]
     fn test_parse_alternative() {
-        let expr = parse_content_expr("paragraph | heading", &HashMap::new()).unwrap();
+        let mut node_types = HashSet::new();
+        node_types.insert("paragraph".to_string());
+        node_types.insert("heading".to_string());
+        let expr = parse_content_expr("paragraph | heading", &HashMap::new(), &node_types).unwrap();
         assert!(!expr.valid_end(0));
         let s1 = expr.match_type(0, "paragraph").unwrap();
         assert!(expr.valid_end(s1));
