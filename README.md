@@ -307,26 +307,24 @@ Current status (latest run):
 | `test-content.cjs` | 52 | 10 |
 | `test-diff.cjs` | 16 | 2 |
 | `test-mapping.cjs` | 9 | 1 |
-| `test-mark.cjs` | 37 | 3 |
+| `test-mark.cjs` | 40 | 0 |
 | `test-node.cjs` | 17 | 23 |
 | `test-replace.cjs` | 22 | 0 |
 | `test-replace_step.cjs` | 0 | 4 |
-| `test-resolve.cjs` | 0 | 2 |
+| `test-resolve.cjs` | 2 | 0 |
 | `test-slice.cjs` | 19 | 1 |
 | `test-step.cjs` | 0 | 19 |
 | `test-structure.cjs` | 18 | 20 |
-| `test-trans.cjs` | 3 | ~169 (panic aborts suite) |
+| `test-trans.cjs` | 5 | 164 |
 
-**Total: ~203 passing, ~275 failing/pending.**
+**Total: 200 passing, 244 failing/pending.**
 
 Key remaining blockers:
-1. `Slice::size()` panics on `open_start + open_end > content.size()` — upstream
-   JS allows negative slice sizes, Rust currently aborts.
-2. `Step.merge` and `ReplaceAroundStep` content-fit checks need binding fixes.
-3. `ResolvedPos.posAtIndex` is missing from the Node binding.
-4. `Transform.replace` core algorithm differences in `test-structure` and `test-trans`.
-5. Static helpers (`Node.toJSON`, `Fragment.fromArray`) and `toDebugString`/`leafText`
-   callable support need shim-level polish.
+1. `Step.merge` not yet exposed in Node bindings — blocks all 19 `test-step.cjs` tests.
+2. `ReplaceStep` / `ReplaceAroundStep` content-fit checks differ from JS — 4 failures in `test-replace_step.cjs`.
+3. `Transform.replace` core algorithm differences (`replace_step` / `Fitter`) — 20 failures in `test-structure.cjs`, 164 in `test-trans.cjs`.
+4. `toDebugString` / `leafText` callable support — 2 failures in `test-node.cjs` where custom schema-spec functions need JS shim preservation.
+5. `Fragment.from(singleNode)` and `Node.fromJSON` aliases now work; `ContentMatch.parse` and `Transform` chaining fixed.
 
 ### Python-generated fixtures
 

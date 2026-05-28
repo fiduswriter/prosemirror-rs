@@ -106,7 +106,7 @@ impl Schema {
         content: Option<Either<&Fragment_, Vec<&Node_>>>,
     ) -> napi::Result<Node_> {
         let attrs = attrs.unwrap_or(Value::Null);
-        let content = match content {
+        let content = self.inner.with_types(|| match content {
             Some(Either::A(frag)) => frag.inner.clone(),
             Some(Either::B(nodes)) => Fragment::from(
                 nodes
@@ -115,7 +115,7 @@ impl Schema {
                     .collect::<Vec<_>>(),
             ),
             None => Fragment::new(),
-        };
+        });
         let marks = MarkSet::new();
         let node = self
             .inner
@@ -867,9 +867,12 @@ pub struct ResolvedPos_ {
 }
 
 impl ResolvedPos_ {
-    fn resolve(&self) -> Option<ResolvedPos<'_, Dyn>> {
-        self.schema
-            .with_types(|| ResolvedPos::<Dyn>::resolve(&self.doc, self.pos).ok())
+    fn with_resolved<R>(&self, f: impl FnOnce(&ResolvedPos<'_, Dyn>) -> R) -> Option<R> {
+        self.schema.with_types(|| {
+            ResolvedPos::<Dyn>::resolve(&self.doc, self.pos)
+                .ok()
+                .map(|r| f(&r))
+        })
     }
 }
 
@@ -882,14 +885,13 @@ impl ResolvedPos_ {
 
     #[napi(getter)]
     pub fn depth(&self) -> u32 {
-        self.resolve().map(|r| r.depth as u32).unwrap_or(0)
+        self.with_resolved(|r| r.depth as u32).unwrap_or(0)
     }
 
     #[napi(getter)]
     pub fn parent(&self) -> Node_ {
         let node = self
-            .resolve()
-            .map(|r| r.parent().clone())
+            .with_resolved(|r| r.parent().clone())
             .unwrap_or_else(|| self.doc.clone());
         Node_ {
             schema: self.schema.clone(),
@@ -899,17 +901,16 @@ impl ResolvedPos_ {
 
     #[napi(getter)]
     pub fn parent_offset(&self) -> u32 {
-        self.resolve().map(|r| r.parent_offset as u32).unwrap_or(0)
+        self.with_resolved(|r| r.parent_offset as u32).unwrap_or(0)
     }
 
     #[napi]
     pub fn node(&self, depth: Option<u32>) -> Node_ {
         let depth = depth
             .map(|d| d as usize)
-            .unwrap_or_else(|| self.resolve().map(|r| r.depth).unwrap_or(0));
+            .unwrap_or_else(|| self.with_resolved(|r| r.depth).unwrap_or(0));
         let node = self
-            .resolve()
-            .map(|r| r.node(depth).clone())
+            .with_resolved(|r| r.node(depth).clone())
             .unwrap_or_else(|| self.doc.clone());
         Node_ {
             schema: self.schema.clone(),
@@ -921,25 +922,25 @@ impl ResolvedPos_ {
     pub fn start(&self, depth: Option<u32>) -> u32 {
         let depth = depth
             .map(|d| d as usize)
-            .unwrap_or_else(|| self.resolve().map(|r| r.depth).unwrap_or(0));
-        self.resolve().map(|r| r.start(depth) as u32).unwrap_or(0)
+            .unwrap_or_else(|| self.with_resolved(|r| r.depth).unwrap_or(0));
+        self.with_resolved(|r| r.start(depth) as u32).unwrap_or(0)
     }
 
     #[napi]
     pub fn end(&self, depth: Option<u32>) -> u32 {
         let depth = depth
             .map(|d| d as usize)
-            .unwrap_or_else(|| self.resolve().map(|r| r.depth).unwrap_or(0));
-        self.resolve().map(|r| r.end(depth) as u32).unwrap_or(0)
+            .unwrap_or_else(|| self.with_resolved(|r| r.depth).unwrap_or(0));
+        self.with_resolved(|r| r.end(depth) as u32).unwrap_or(0)
     }
 
     #[napi]
     pub fn before(&self, depth: Option<u32>) -> u32 {
         let depth = depth
             .map(|d| d as usize)
-            .unwrap_or_else(|| self.resolve().map(|r| r.depth).unwrap_or(0));
-        self.resolve()
-            .and_then(|r| r.before(depth))
+            .unwrap_or_else(|| self.with_resolved(|r| r.depth).unwrap_or(0));
+        self.with_resolved(|r| r.before(depth))
+            .flatten()
             .map(|p| p as u32)
             .unwrap_or(0)
     }
@@ -948,54 +949,57 @@ impl ResolvedPos_ {
     pub fn after(&self, depth: Option<u32>) -> u32 {
         let depth = depth
             .map(|d| d as usize)
-            .unwrap_or_else(|| self.resolve().map(|r| r.depth).unwrap_or(0));
-        self.resolve()
-            .and_then(|r| r.after(depth))
+            .unwrap_or_else(|| self.with_resolved(|r| r.depth).unwrap_or(0));
+        self.with_resolved(|r| r.after(depth))
+            .flatten()
             .map(|p| p as u32)
             .unwrap_or(0)
     }
 
     #[napi(getter)]
     pub fn node_before(&self) -> Option<Node_> {
-        self.resolve().and_then(|r| {
+        self.with_resolved(|r| {
             r.node_before().map(|n| Node_ {
                 schema: self.schema.clone(),
                 inner: n.into_owned(),
             })
         })
+        .flatten()
     }
 
     #[napi(getter)]
     pub fn node_after(&self) -> Option<Node_> {
-        self.resolve().and_then(|r| {
+        self.with_resolved(|r| {
             r.node_after().map(|n| Node_ {
                 schema: self.schema.clone(),
                 inner: n.into_owned(),
             })
         })
+        .flatten()
     }
 
     #[napi]
     pub fn marks(&self) -> Vec<Mark_> {
-        self.resolve()
-            .map(|r| {
-                r.marks()
-                    .into_iter()
-                    .map(|m| Mark_ {
-                        schema: self.schema.clone(),
-                        inner: m,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+        self.with_resolved(|r| {
+            r.marks()
+                .into_iter()
+                .map(|m| Mark_ {
+                    schema: self.schema.clone(),
+                    inner: m,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
     }
 
     #[napi]
     pub fn pos_at_index(&self, index: u32, depth: Option<u32>) -> u32 {
         let depth = depth.map(|d| d as usize);
-        self.resolve()
-            .map(|r| r.pos_at_index(index as usize, depth) as u32)
-            .unwrap_or(0)
+        self.schema.with_types(|| {
+            ResolvedPos::<Dyn>::resolve(&self.doc, self.pos)
+                .map(|r| r.pos_at_index(index as usize, depth) as u32)
+                .unwrap_or(0)
+        })
     }
 }
 

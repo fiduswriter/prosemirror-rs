@@ -36,7 +36,7 @@ const IMPORT_REPLACEMENTS = [
     from: "prosemirror-test-builder",
     to: "./test-shim/prosemirror-test-builder.cjs",
   },
-  { from: "ist", to: "ist" },
+  { from: "ist", to: "./test-shim/ist.cjs" },
 ];
 
 const TEMP_DIR = join(__dirname, ".upstream-tests");

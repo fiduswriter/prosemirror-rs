@@ -200,3 +200,16 @@ fn document_node_sizes() {
         assert_eq!(d.child_count(), 2);
     });
 }
+
+#[test]
+fn test_after_at_pos_1() {
+    let schema = DynamicSchema::from_json(&basic_spec_json()).unwrap();
+    let d = test_doc(&schema);
+    schema.with_types(|| {
+        let r = d.resolve(1).unwrap();
+        assert_eq!(r.depth, 1);
+        assert_eq!(r.start(1), 1);
+        assert_eq!(r.end(1), 3);
+        assert_eq!(r.after(1), Some(4));
+    });
+}
