@@ -29,6 +29,7 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64
+            manylinux: off
           - os: ubuntu-latest
             target: aarch64
             # No Python interpreter is available in the aarch64 manylinux
@@ -47,7 +48,7 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: '3.x'
+          python-version: '3.14'
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
@@ -56,7 +57,7 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist ${{ matrix.extra-args }}
           sccache: 'true'
-          manylinux: auto
+          manylinux: ${{ matrix.manylinux || 'auto' }}
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v7
