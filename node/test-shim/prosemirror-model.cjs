@@ -1,5 +1,15 @@
 const bindings = require("../prosemirror-rs.linux-x64-gnu.node");
 
+const schemaRawSpecs = new WeakMap();
+
+function getRawSpec(schema) {
+  return schemaRawSpecs.get(schema);
+}
+
+function setRawSpec(schema, spec) {
+  schemaRawSpecs.set(schema, spec);
+}
+
 const {
   Schema,
   Node,
@@ -16,9 +26,30 @@ const {
 // Strip functions from schema specs before passing to Rust
 // ---------------------------------------------------------------------------
 
+function nodeTypeToSpec(nt) {
+  const rawSpec = getRawSpec(nt.schema);
+  if (rawSpec && rawSpec.nodes) {
+    const spec = rawSpec.nodes[nt.name];
+    if (spec) return stripFunctions(spec);
+  }
+  return {};
+}
+
+function markTypeToSpec(mt) {
+  const rawSpec = getRawSpec(mt.schema);
+  if (rawSpec && rawSpec.marks) {
+    const spec = rawSpec.marks[mt.name];
+    if (spec) return stripFunctions(spec);
+  }
+  return {};
+}
+
 function stripFunctions(obj) {
   if (typeof obj === "function") return undefined;
   if (obj === null || typeof obj !== "object") return obj;
+  if (obj instanceof NodeType) return nodeTypeToSpec(obj);
+  if (obj instanceof MarkType) return markTypeToSpec(obj);
+  if (obj instanceof Schema) return obj;
   if (Array.isArray(obj)) return obj.map(stripFunctions);
   const result = {};
   for (const key in obj) {
@@ -75,9 +106,34 @@ function ShimSchema(spec) {
   const stripped = stripFunctions(spec);
   const schema = new OrigSchema(stripped);
   schema._rawSpec = spec;
+  setRawSpec(schema, spec);
+  const specNodes = makeOrderedMap({});
+  for (const key in schema.nodes) {
+    const nt = schema.nodes[key];
+    specNodes[key] = nt;
+    Object.defineProperty(nt, "schema", {
+      get() {
+        return schema;
+      },
+      configurable: true,
+      enumerable: false,
+    });
+  }
+  const specMarks = makeOrderedMap({});
+  for (const key in schema.marks) {
+    const mt = schema.marks[key];
+    specMarks[key] = mt;
+    Object.defineProperty(mt, "schema", {
+      get() {
+        return schema;
+      },
+      configurable: true,
+      enumerable: false,
+    });
+  }
   schema.spec = {
-    nodes: makeOrderedMap(spec.nodes),
-    marks: makeOrderedMap(spec.marks),
+    nodes: specNodes,
+    marks: specMarks,
   };
   return schema;
 }
@@ -90,8 +146,27 @@ ShimSchema.prototype = OrigSchema.prototype;
 Node.fromJSON = Node.fromJson;
 Node.prototype.toJSON = Node.prototype.toJson;
 
+// Wrap Fragment because napi-rs static methods are non-configurable
+const WrappedFragment = Object.create(Fragment);
+Object.setPrototypeOf(WrappedFragment, Fragment);
+Object.defineProperty(WrappedFragment, "from", {
+  value: function (nodes) {
+    if (nodes instanceof Node) nodes = [nodes];
+    return Fragment.from(nodes);
+  },
+  writable: true,
+  configurable: true,
+  enumerable: true,
+});
+Object.defineProperty(WrappedFragment, "fromArray", {
+  value: Fragment.fromArray.bind(Fragment),
+  writable: true,
+  configurable: true,
+  enumerable: true,
+});
+
 // Static properties that napi-rs can't expose directly
-Slice.empty = new Slice(Fragment.from([]), 0, 0);
+Slice.empty = new Slice(WrappedFragment.from([]), 0, 0);
 
 // ---------------------------------------------------------------------------
 // toDebugString / leafText support
@@ -134,6 +209,22 @@ Object.defineProperty(Node.prototype, "textContent", {
 });
 
 // ---------------------------------------------------------------------------
+// Slice.toString shim
+// ---------------------------------------------------------------------------
+
+Slice.prototype.toString = function () {
+  return (
+    "<" +
+    this.content.toString() +
+    ">(" +
+    this.openStart +
+    "," +
+    this.openEnd +
+    ")"
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Fragment.text_between shim
 // ---------------------------------------------------------------------------
 
@@ -143,7 +234,7 @@ Fragment.prototype.toString = function () {
   for (let i = 0; i < this.childCount; i++) {
     inner.push(this.child(i).toString());
   }
-  return "<" + inner.join(", ") + ">";
+  return inner.join(", ");
 };
 
 // ---------------------------------------------------------------------------
@@ -172,7 +263,7 @@ ContentMatch.parse = function (expr, nodeTypes) {
 module.exports = {
   Schema: ShimSchema,
   Node,
-  Fragment,
+  Fragment: WrappedFragment,
   Slice,
   ResolvedPos,
   Mark,

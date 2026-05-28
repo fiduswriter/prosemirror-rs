@@ -54,7 +54,7 @@ cargo test test_resolve
 ## Performance
 
 The Rust implementation is significantly faster and more memory-efficient than
-the pure-Python `prosemirror` package.  Benchmark results from fiduswriter
+the pure-Python `prosemirror` package. Benchmark results from fiduswriter
 (2000 documents × 500 steps each):
 
 ```
@@ -93,28 +93,28 @@ The crate has three main modules:
 
 Core data structures for representing ProseMirror documents:
 
-| Type | Description |
-|------|-------------|
-| `Node<S>` trait | A document node (element, text, or leaf) |
-| `Fragment<S>` | An ordered collection of child nodes |
-| `Mark<S>` / `MarkSet<S>` | Inline formatting (bold, italic, etc.) |
-| `ResolvedPos<S>` | A position resolved against a document tree |
-| `NodeRange<S>` | A range between two resolved positions at a given depth |
-| `Slice<S>` | A piece of document content with open boundaries |
-| `ContentMatch<S>` trait | DFA-based content expression matching |
-| `NodeType<S>` trait | Type descriptor for a node kind |
-| `Schema` trait | Defines the full set of node types, mark types, and content rules |
+| Type                     | Description                                                       |
+| ------------------------ | ----------------------------------------------------------------- |
+| `Node<S>` trait          | A document node (element, text, or leaf)                          |
+| `Fragment<S>`            | An ordered collection of child nodes                              |
+| `Mark<S>` / `MarkSet<S>` | Inline formatting (bold, italic, etc.)                            |
+| `ResolvedPos<S>`         | A position resolved against a document tree                       |
+| `NodeRange<S>`           | A range between two resolved positions at a given depth           |
+| `Slice<S>`               | A piece of document content with open boundaries                  |
+| `ContentMatch<S>` trait  | DFA-based content expression matching                             |
+| `NodeType<S>` trait      | Type descriptor for a node kind                                   |
+| `Schema` trait           | Defines the full set of node types, mark types, and content rules |
 
 ### `transform` — Document transformations
 
-| Type | Description |
-|------|-------------|
-| `Step<S>` enum | A single atomic change (replace, add-mark, remove-mark, attr, etc.) |
-| `StepMap` / `Mapping` | Position offset maps for tracking changes |
-| `Transform<S>` | Builder that accumulates steps and tracks the document |
-| `replace_step()` | Smart replace algorithm (the "Fitter") |
-| `can_split()`, `can_join()`, `lift_target()`, `find_wrapping()` | Structure analysis |
-| `join_point()`, `insert_point()`, `drop_point()` | Position finding |
+| Type                                                            | Description                                                         |
+| --------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `Step<S>` enum                                                  | A single atomic change (replace, add-mark, remove-mark, attr, etc.) |
+| `StepMap` / `Mapping`                                           | Position offset maps for tracking changes                           |
+| `Transform<S>`                                                  | Builder that accumulates steps and tracks the document              |
+| `replace_step()`                                                | Smart replace algorithm (the "Fitter")                              |
+| `can_split()`, `can_join()`, `lift_target()`, `find_wrapping()` | Structure analysis                                                  |
+| `join_point()`, `insert_point()`, `drop_point()`                | Position finding                                                    |
 
 ### `dynamic` — Runtime schema from JSON
 
@@ -164,16 +164,16 @@ schema.with_types(|| {
 
 The `Step<S>` enum supports all step types from the JS/Python implementations:
 
-| Variant | JS class | Description |
-|---------|----------|-------------|
-| `Replace` | `ReplaceStep` | Replace a range with a slice |
-| `ReplaceAround` | `ReplaceAroundStep` | Replace while preserving structure |
-| `AddMark` | `AddMarkStep` | Add a mark to an inline range |
-| `RemoveMark` | `RemoveMarkStep` | Remove a mark from an inline range |
-| `AddNodeMark` | `AddNodeMarkStep` | Add a mark to a specific node |
-| `RemoveNodeMark` | `RemoveNodeMarkStep` | Remove a mark from a specific node |
-| `Attr` | `AttrStep` | Set an attribute on a node |
-| `DocAttr` | `DocAttrStep` | Set an attribute on the document root |
+| Variant          | JS class             | Description                           |
+| ---------------- | -------------------- | ------------------------------------- |
+| `Replace`        | `ReplaceStep`        | Replace a range with a slice          |
+| `ReplaceAround`  | `ReplaceAroundStep`  | Replace while preserving structure    |
+| `AddMark`        | `AddMarkStep`        | Add a mark to an inline range         |
+| `RemoveMark`     | `RemoveMarkStep`     | Remove a mark from an inline range    |
+| `AddNodeMark`    | `AddNodeMarkStep`    | Add a mark to a specific node         |
+| `RemoveNodeMark` | `RemoveNodeMarkStep` | Remove a mark from a specific node    |
+| `Attr`           | `AttrStep`           | Set an attribute on a node            |
+| `DocAttr`        | `DocAttrStep`        | Set an attribute on the document root |
 
 Each step type supports:
 
@@ -302,29 +302,33 @@ node run-upstream-tests.mjs
 
 Current status (latest run):
 
-| File | Passing | Failing / Pending |
-|---|---|---|
-| `test-content.cjs` | 52 | 10 |
-| `test-diff.cjs` | 16 | 2 |
-| `test-mapping.cjs` | 9 | 1 |
-| `test-mark.cjs` | 40 | 0 |
-| `test-node.cjs` | 17 | 23 |
-| `test-replace.cjs` | 22 | 0 |
-| `test-replace_step.cjs` | 0 | 4 |
-| `test-resolve.cjs` | 2 | 0 |
-| `test-slice.cjs` | 19 | 1 |
-| `test-step.cjs` | 0 | 19 |
-| `test-structure.cjs` | 18 | 20 |
-| `test-trans.cjs` | 5 | 164 |
+| File                    | Passing | Failing / Pending |
+| ----------------------- | ------- | ----------------- |
+| `test-content.cjs`      | 62      | 0                 |
+| `test-diff.cjs`         | 17      | 1                 |
+| `test-mapping.cjs`      | 10      | 0                 |
+| `test-mark.cjs`         | 40      | 0                 |
+| `test-node.cjs`         | 21      | 19                |
+| `test-replace.cjs`      | 22      | 0                 |
+| `test-replace_step.cjs` | 1       | 3                 |
+| `test-resolve.cjs`      | 2       | 0                 |
+| `test-slice.cjs`        | 20      | 0                 |
+| `test-step.cjs`         | 19      | 0                 |
+| `test-structure.cjs`    | 35      | 3                 |
+| `test-trans.cjs`        | 10      | 159               |
 
-**Total: 200 passing, 244 failing/pending.**
+**Total: 259 passing, 185 failing/pending.**
 
 Key remaining blockers:
-1. `Step.merge` not yet exposed in Node bindings — blocks all 19 `test-step.cjs` tests.
-2. `ReplaceStep` / `ReplaceAroundStep` content-fit checks differ from JS — 4 failures in `test-replace_step.cjs`.
-3. `Transform.replace` core algorithm differences (`replace_step` / `Fitter`) — 20 failures in `test-structure.cjs`, 164 in `test-trans.cjs`.
-4. `toDebugString` / `leafText` callable support — 2 failures in `test-node.cjs` where custom schema-spec functions need JS shim preservation.
-5. `Fragment.from(singleNode)` and `Node.fromJSON` aliases now work; `ContentMatch.parse` and `Transform` chaining fixed.
+
+1. `Transform.replace` core algorithm differences (`replace_step` / `Fitter`) — 3 failures in `test-structure.cjs`, 159 in `test-trans.cjs`.
+2. `ReplaceStep` / `ReplaceAroundStep` content-fit checks differ from JS — 3 failures in `test-replace_step.cjs`.
+3. `nodesBetween`, `textBetween`, `nodeFromJSON`, `toDebugString`/`leafText` callable support — 19 failures in `test-node.cjs`.
+4. `changedRange` not exposed on Transform — 5 failures in `test-trans.cjs`.
+5. `findDiffEnd` returns wrong value — 1 failure in `test-diff.cjs`.
+6. `Step.merge` now exposed in Node bindings — all 19 `test-step.cjs` tests pass.
+7. `blockRange`, `NodeRange`, `liftTarget`, `findWrapping`, `Transform.lift`, `Transform.wrap` now working — 17 `test-structure.cjs` tests fixed.
+8. `removeNodeMark` now accepts both `Mark` and `MarkType` via unified `MarkOrType` core API.
 
 ### Python-generated fixtures
 
@@ -339,6 +343,7 @@ python ../prosemirror-rs/tests/spec/generate_fixtures.py
 ```
 
 Generated JSON files in `tests/spec/expected/`:
+
 - `mapping.json` — StepMap/Mapping test cases
 - `step_merge.json` — Step merge test cases
 - `transform_marks.json` — addMark/removeMark test cases
@@ -366,7 +371,7 @@ This crate currently defines no Cargo feature flags.
 ## Releasing a new version
 
 Before tagging a release, bump the version number in **all five** packaging
-files to the same new version string.  Use the helper script:
+files to the same new version string. Use the helper script:
 
 ```bash
 python scripts/bump-version.py        # show current versions
@@ -376,13 +381,13 @@ python scripts/bump-version.py --check # exit 1 if they differ
 
 The files it manages:
 
-| File | Key |
-|------|-----|
-| [`Cargo.toml`](Cargo.toml) | `[package] version` — the Rust crate published to crates.io |
-| [`python/Cargo.toml`](python/Cargo.toml) | `[package] version` — the native extension built by maturin |
-| [`python/pyproject.toml`](python/pyproject.toml) | `[project] version` — the Python package published to PyPI |
-| [`node/Cargo.toml`](node/Cargo.toml) | `[package] version` — the native extension built by cargo |
-| [`node/package.json`](node/package.json) | `version` — the npm package published to npm |
+| File                                             | Key                                                         |
+| ------------------------------------------------ | ----------------------------------------------------------- |
+| [`Cargo.toml`](Cargo.toml)                       | `[package] version` — the Rust crate published to crates.io |
+| [`python/Cargo.toml`](python/Cargo.toml)         | `[package] version` — the native extension built by maturin |
+| [`python/pyproject.toml`](python/pyproject.toml) | `[project] version` — the Python package published to PyPI  |
+| [`node/Cargo.toml`](node/Cargo.toml)             | `[package] version` — the native extension built by cargo   |
+| [`node/package.json`](node/package.json)         | `version` — the npm package published to npm                |
 
 Once the files are updated and committed, push an annotated tag to trigger
 the publish workflow:

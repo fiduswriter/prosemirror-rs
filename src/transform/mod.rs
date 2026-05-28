@@ -19,7 +19,7 @@ pub use replace::{close_fragment, covered_depths, replace_step as smart_replace_
 pub use replace_step::{ReplaceAroundStep, ReplaceStep};
 pub use step::{StepError, StepKind, StepResult};
 pub use structure::Wrapper;
-pub use transform::Transform;
+pub use transform::{MarkOrType, Transform};
 pub use util::Span;
 
 mod util;

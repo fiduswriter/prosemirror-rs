@@ -104,6 +104,7 @@ impl Schema {
         type_name: String,
         attrs: Option<Value>,
         content: Option<Either<&Fragment_, Vec<&Node_>>>,
+        marks: Option<Vec<&Mark_>>,
     ) -> napi::Result<Node_> {
         let attrs = attrs.unwrap_or(Value::Null);
         let content = self.inner.with_types(|| match content {
@@ -116,7 +117,9 @@ impl Schema {
             ),
             None => Fragment::new(),
         });
-        let marks = MarkSet::new();
+        let marks = marks
+            .map(|m| MarkSet::from_vec(m.into_iter().map(|mark| mark.inner.clone()).collect()))
+            .unwrap_or_else(MarkSet::new);
         let node = self
             .inner
             .node(&type_name, attrs, content, marks)
@@ -443,20 +446,14 @@ impl Fragment_ {
         }
     }
 
-    #[napi(factory)]
-    pub fn from_(nodes: Option<Either<&Node_, Vec<&Node_>>>) -> Fragment_ {
+    #[napi]
+    pub fn from_(nodes: Option<Vec<&Node_>>) -> Fragment_ {
         match nodes {
             None => Fragment_ {
                 schema: Arc::new(DynamicSchema::default()),
                 inner: Fragment::new(),
             },
-            Some(Either::A(node)) => Fragment_ {
-                schema: node.schema.clone(),
-                inner: node
-                    .schema
-                    .with_types(|| Fragment::from(vec![node.inner.clone()])),
-            },
-            Some(Either::B(nodes)) => {
+            Some(nodes) => {
                 let schema = nodes
                     .first()
                     .map(|n| n.schema.clone())
@@ -755,11 +752,12 @@ impl Node_ {
     }
 
     #[napi]
-    pub fn slice(&self, from: u32, to: Option<u32>) -> Slice_ {
+    pub fn slice(&self, from: u32, to: Option<u32>, include_parents: Option<bool>) -> Slice_ {
         let to = to.map(|t| t as usize).unwrap_or(self.inner.content_size());
+        let include_parents = include_parents.unwrap_or(false);
         let slice = self.schema.with_types(|| {
             self.inner
-                .slice(from as usize..to, false)
+                .slice(from as usize..to, include_parents)
                 .unwrap_or_else(|_| Slice::new(Fragment::new(), 0, 0))
         });
         Slice_ {
@@ -1000,6 +998,99 @@ impl ResolvedPos_ {
                 .map(|r| r.pos_at_index(index as usize, depth) as u32)
                 .unwrap_or(0)
         })
+    }
+
+    #[napi(js_name = "blockRange")]
+    pub fn block_range(&self, other: Option<&ResolvedPos_>) -> Option<NodeRange_> {
+        self.schema.with_types(|| {
+            let rp = ResolvedPos::<Dyn>::resolve(&self.doc, self.pos).ok()?;
+            let other_rp = other.and_then(|o| ResolvedPos::<Dyn>::resolve(&o.doc, o.pos).ok());
+            let other_ref = other_rp.as_ref();
+            let range = rp.block_range(other_ref, None)?;
+            Some(NodeRange_ {
+                schema: self.schema.clone(),
+                doc: self.doc.clone(),
+                from_pos: range.from.pos,
+                to_pos: range.to.pos,
+                depth: range.depth,
+            })
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NodeRange
+// ---------------------------------------------------------------------------
+
+#[napi]
+pub struct NodeRange_ {
+    schema: Arc<DynamicSchema>,
+    doc: DynamicNode,
+    from_pos: usize,
+    to_pos: usize,
+    depth: usize,
+}
+
+#[napi]
+impl NodeRange_ {
+    #[napi(getter)]
+    pub fn from(&self) -> ResolvedPos_ {
+        ResolvedPos_ {
+            schema: self.schema.clone(),
+            doc: self.doc.clone(),
+            pos: self.from_pos,
+        }
+    }
+
+    #[napi(getter)]
+    pub fn to(&self) -> ResolvedPos_ {
+        ResolvedPos_ {
+            schema: self.schema.clone(),
+            doc: self.doc.clone(),
+            pos: self.to_pos,
+        }
+    }
+
+    #[napi(getter)]
+    pub fn depth(&self) -> u32 {
+        self.depth as u32
+    }
+
+    #[napi(getter)]
+    pub fn start(&self) -> u32 {
+        self.schema
+            .with_types(|| {
+                let from_rp = ResolvedPos::<Dyn>::resolve(&self.doc, self.from_pos).ok()?;
+                from_rp.before(self.depth + 1).map(|p| p as u32)
+            })
+            .unwrap_or(0)
+    }
+
+    #[napi(getter)]
+    pub fn end(&self) -> u32 {
+        self.schema
+            .with_types(|| {
+                let to_rp = ResolvedPos::<Dyn>::resolve(&self.doc, self.to_pos).ok()?;
+                to_rp.after(self.depth + 1).map(|p| p as u32)
+            })
+            .unwrap_or(0)
+    }
+
+    #[napi(getter)]
+    pub fn parent(&self) -> Node_ {
+        self.schema
+            .with_types(|| {
+                let from_rp = ResolvedPos::<Dyn>::resolve(&self.doc, self.from_pos).ok()?;
+                Some(from_rp.node(self.depth).clone())
+            })
+            .map(|node| Node_ {
+                schema: self.schema.clone(),
+                inner: node,
+            })
+            .unwrap_or_else(|| Node_ {
+                schema: self.schema.clone(),
+                inner: self.doc.clone(),
+            })
     }
 }
 

@@ -16,7 +16,7 @@ use prosemirror::transform::{
         find_wrapping as rs_find_wrapping, insert_point as rs_insert_point,
         join_point as rs_join_point, lift_target as rs_lift_target, NodeRange,
     },
-    AddMarkStep, RemoveMarkStep, ReplaceStep, Step, Transform,
+    AddMarkStep, MarkOrType, RemoveMarkStep, ReplaceStep, Step, Transform,
 };
 
 // ---------------------------------------------------------------------------
@@ -607,44 +607,18 @@ impl PyTransform {
         pos: usize,
         mark: &Bound<'_, PyAny>,
     ) -> PyResult<Py<Self>> {
-        let schema = slf.borrow().schema.clone();
-        if let Ok(mark_type) = mark.cast::<PyMarkType>() {
-            let target_idx = mark_type.borrow().inner.idx;
-            let marks_to_remove: Vec<crate::model::PyMark> = {
-                let this = slf.borrow();
-                schema.with_types(|| {
-                    this.inner
-                        .doc
-                        .node_at(pos)
-                        .and_then(|node| node.marks())
-                        .map(|mark_set| {
-                            mark_set
-                                .iter()
-                                .filter(|m| m.r#type().idx == target_idx)
-                                .map(|m| crate::model::PyMark {
-                                    schema: this.schema.clone(),
-                                    inner: m.clone(),
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default()
-                })
-            };
-            for mark in marks_to_remove.into_iter().rev() {
-                let mut this = slf.borrow_mut();
-                schema.with_types(|| {
-                    this.inner.remove_node_mark(pos, mark.inner);
-                });
-            }
+        let mark = if let Ok(mark_type) = mark.cast::<PyMarkType>() {
+            MarkOrType::MarkType(mark_type.borrow().inner)
         } else if let Ok(mark) = mark.cast::<PyMark>() {
-            let mut this = slf.borrow_mut();
-            schema.with_types(|| {
-                this.inner
-                    .remove_node_mark(pos, mark.borrow().inner.clone());
-            });
+            MarkOrType::Mark(mark.borrow().inner.clone())
         } else {
             return Err(PyValueError::new_err("mark must be a Mark or MarkType"));
-        }
+        };
+        let schema = slf.borrow().schema.clone();
+        let mut this = slf.borrow_mut();
+        schema.with_types(|| {
+            this.inner.remove_node_mark(pos, mark);
+        });
         Ok(slf.clone().unbind())
     }
 

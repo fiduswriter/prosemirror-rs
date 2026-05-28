@@ -70,7 +70,7 @@ function block(type, attrs = null) {
     let myAttrs = takeAttrs(attrs, args);
     let { nodes, tag } = flatten(type.schema, args, id);
     let node = type.create(myAttrs, nodes);
-    if (tag !== NO_TAG) node.tag = tag;
+    node.tag = tag === NO_TAG ? {} : tag;
     return node;
   };
   if (type.isLeaf) {
@@ -103,10 +103,10 @@ function builders(schema, names) {
       let typeName = value.nodeType || value.markType || name;
       let type = schema.nodes[typeName];
       if (type) {
-        result[name] = block(type, value);
+        result[name] = block(type, value.attrs || {});
       } else {
         type = schema.marks[typeName];
-        if (type) result[name] = mark(type, value);
+        if (type) result[name] = mark(type, value.attrs || {});
       }
     }
   }

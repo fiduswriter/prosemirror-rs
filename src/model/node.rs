@@ -277,8 +277,6 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
         let to = util::to(&range, self.node_size());
         // FIXME: this max value is my guess, that needs to be tested out
 
-        assert!(to >= from, "replace: {} >= {}", to, from);
-
         let rp_from = self.resolve(from)?;
         let rp_to = self.resolve(to)?;
 

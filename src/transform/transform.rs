@@ -15,6 +15,14 @@ fn defines_content<S: Schema>(node_type: S::NodeType) -> bool {
     node_type.is_defining() || node_type.is_defining_for_content()
 }
 
+/// Either a specific mark or a mark type, used for `remove_node_mark`.
+pub enum MarkOrType<S: Schema> {
+    /// A specific mark to remove.
+    Mark(S::Mark),
+    /// A mark type — all marks of this type will be removed.
+    MarkType(S::MarkType),
+}
+
 /// A Transform is a collection of steps that can be applied to a document.
 ///
 /// It maintains the current document state, accumulated steps, document history,
@@ -588,19 +596,34 @@ impl<S: Schema> Transform<S> {
     }
 
     /// Remove a node mark step.
-    pub fn remove_node_mark(&mut self, pos: usize, mark: S::Mark) -> &mut Self {
-        if let Some(node) = self.doc.node_at(pos) {
-            if let Some(marks) = node.marks() {
-                if !marks.contains(&mark) {
-                    return self;
-                }
-            } else {
-                return self;
-            }
-        } else {
+    ///
+    /// If `mark` is a specific [`Mark`](crate::model::Mark), only that exact mark is removed.
+    /// If `mark` is a [`MarkType`](crate::model::Schema::MarkType), all marks of that type are removed.
+    pub fn remove_node_mark(&mut self, pos: usize, mark: MarkOrType<S>) -> &mut Self {
+        let Some(node) = self.doc.node_at(pos) else {
             return self;
+        };
+        let Some(marks) = node.marks() else {
+            return self;
+        };
+        match mark {
+            MarkOrType::Mark(mark) => {
+                if marks.contains(&mark) {
+                    let _ = self.maybe_step(Step::RemoveNodeMark(RemoveNodeMarkStep { pos, mark }));
+                }
+            }
+            MarkOrType::MarkType(mark_type) => {
+                let mut remaining: Vec<S::Mark> = marks.iter().cloned().collect();
+                let mut steps = Vec::new();
+                while let Some(idx) = remaining.iter().position(|m| m.r#type() == mark_type) {
+                    let mark = remaining.remove(idx);
+                    steps.push(Step::RemoveNodeMark(RemoveNodeMarkStep { pos, mark }));
+                }
+                for step in steps.into_iter().rev() {
+                    let _ = self.maybe_step(step);
+                }
+            }
         }
-        let _ = self.maybe_step(Step::RemoveNodeMark(RemoveNodeMarkStep { pos, mark }));
         self
     }
 

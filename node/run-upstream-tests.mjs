@@ -112,19 +112,25 @@ function copyAndRewrite(srcDir, file) {
     },
   );
 
-  // Replace any remaining import statements
-  rewritten = rewritten.replace(/^import\s+.*from\s+".*";?\s*$/gm, "");
-  rewritten = rewritten.replace(/^import\s+.*;?\s*$/gm, "");
-
   // Handle relative imports like: import {testTransform} from "./trans.js"
   rewritten = rewritten.replace(
     /import\s+\{([^}]+)\}\s+from\s+"\.\/([^"]+)"/g,
-    `const {$1} = require("./$2")`,
+    (match, bindings, path) => {
+      const cjsPath = path.replace(/\.js$/, ".cjs");
+      return `const {${bindings}} = require("./${cjsPath}")`;
+    },
   );
   rewritten = rewritten.replace(
     /import\s+(\w+)\s+from\s+"\.\/([^"]+)"/g,
-    `const $1 = require("./$2")`,
+    (match, binding, path) => {
+      const cjsPath = path.replace(/\.js$/, ".cjs");
+      return `const ${binding} = require("./${cjsPath}")`;
+    },
   );
+
+  // Replace any remaining import statements
+  rewritten = rewritten.replace(/^import\s+.*from\s+".*";?\s*$/gm, "");
+  rewritten = rewritten.replace(/^import\s+.*;?\s*$/gm, "");
 
   // Handle ES exports in helper files like trans.js
   const exports = [];

@@ -4,7 +4,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::Value;
 
-use crate::model::{Fragment_, Mark_, Node_, ResolvedPos_, Slice_};
+use crate::model::{Fragment_, MarkType_, Mark_, Node_, ResolvedPos_, Slice_};
 use prosemirror::dynamic::types::{Dyn, DynamicNodeType};
 use prosemirror::dynamic::DynamicSchema;
 use prosemirror::model::{Fragment, MarkSet, Node, NodeType, ResolvedPos, Slice};
@@ -15,8 +15,8 @@ use prosemirror::transform::{
         find_wrapping as rs_find_wrapping, insert_point as rs_insert_point,
         join_point as rs_join_point, lift_target as rs_lift_target, NodeRange,
     },
-    AddMarkStep, AddNodeMarkStep, AttrStep, DocAttrStep, RemoveMarkStep, RemoveNodeMarkStep,
-    ReplaceAroundStep, ReplaceStep, Step, Transform,
+    AddMarkStep, AddNodeMarkStep, AttrStep, DocAttrStep, MarkOrType, RemoveMarkStep,
+    RemoveNodeMarkStep, ReplaceAroundStep, ReplaceStep, Step, Transform,
 };
 
 // ---------------------------------------------------------------------------
@@ -96,6 +96,11 @@ impl MapResult_ {
     #[napi(getter)]
     pub fn deleted_after(&self) -> bool {
         self.inner.deleted_after()
+    }
+
+    #[napi(getter)]
+    pub fn deleted_across(&self) -> bool {
+        self.inner.deleted_across()
     }
 }
 
@@ -366,7 +371,7 @@ impl Transform_ {
     pub fn doc(&self) -> Node_ {
         Node_ {
             schema: self.schema.clone(),
-            inner: self.inner.before().clone(),
+            inner: self.inner.doc.clone(),
         }
     }
 
@@ -475,7 +480,15 @@ impl Transform_ {
     pub fn remove_node_mark(&mut self, pos: u32, mark: &Mark_) {
         self.schema.with_types(|| {
             self.inner
-                .remove_node_mark(pos as usize, mark.inner.clone());
+                .remove_node_mark(pos as usize, MarkOrType::Mark(mark.inner.clone()));
+        });
+    }
+
+    #[napi(js_name = "removeNodeMarkType")]
+    pub fn remove_node_mark_type(&mut self, pos: u32, mark_type: &MarkType_) {
+        self.schema.with_types(|| {
+            self.inner
+                .remove_node_mark(pos as usize, MarkOrType::MarkType(mark_type.inner));
         });
     }
 
