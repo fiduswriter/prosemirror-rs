@@ -331,7 +331,7 @@ impl<S: Schema> Transform<S> {
         let mut preferred_target = -(from_rp.depth as isize + 1);
         target_depths.insert(0, preferred_target);
 
-        let mut pos = from_rp.pos - 1;
+        let mut pos = from_rp.pos.saturating_sub(1);
         for d in (1..=from_rp.depth).rev() {
             let node_type = from_rp.node(d).r#type();
             if node_type.is_defining()
