@@ -56,29 +56,9 @@ pub trait NodeType<S: Schema>: Copy + Clone + Debug + PartialEq + Eq {
         false
     }
 
-    /// Whether this type is defining (for replaceRange behavior)
-    fn is_defining(self) -> bool {
-        false
-    }
-
-    /// Whether this type is defining as context (for replaceRange behavior)
-    fn is_defining_as_context(self) -> bool {
-        false
-    }
-
-    /// Whether this type is defining for content (for replaceRange behavior)
-    fn is_defining_for_content(self) -> bool {
-        false
-    }
-
     /// Whether this node type has required attributes (no defaults)
     fn has_required_attrs(self) -> bool {
         false
-    }
-
-    /// Whitespace handling mode for this node type (e.g. "pre")
-    fn whitespace(self) -> Option<String> {
-        None
     }
 
     /// Create a node of this type, filling in missing required child nodes
@@ -347,8 +327,12 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
     }
 
     /// Get the node at the given document position.
-    /// Returns the deepest node that covers the position.
+    /// Returns the node that covers the position (for non-text content positions,
+    /// returns the child node; for text positions, returns the text node).
     fn node_at(&self, pos: usize) -> Option<&Self> {
+        if pos == 0 {
+            return Some(self);
+        }
         let content = self.content()?;
         content.node_at(pos)
     }

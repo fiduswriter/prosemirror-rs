@@ -253,25 +253,15 @@ Currently implemented syntax includes `*`, `+`, `?`, `|`, simple grouping with
 
 The test suite is structured as:
 
-1. **Library unit tests** (`cargo test --lib`) — 56+ tests covering model internals,
+1. **Library unit tests** (`cargo test --lib`) — 44 tests covering model internals,
    transform operations, content expression parsing, and dynamic schema loading.
 
 2. **Integration tests** (`tests/`) — Ported from the JS and Python test suites:
 
    - `tests/test_resolve.rs` — 9 tests from `prosemirror-model/test/test-resolve.ts`
    - `tests/test_mapping.rs` — 11 tests from `prosemirror-transform/test/test-mapping.ts`
-   - `tests/test_replace_around.rs` — Custom `replaceAround` tests
-   - `tests/test_transform_wrap.rs` — Wrapper-stack rejection tests
 
-3. **Upstream Python test suite** (`python/tests/upstream/`) — The full
-   `prosemirror-py` test suite runs directly against the Rust implementation via
-   a Python compatibility shim. **486/486 tests pass**:
-
-   ```bash
-   pytest python/tests/upstream/
-   ```
-
-4. **Python-generated fixtures** (`tests/spec/`) — A Python script that uses
+3. **Python-generated fixtures** (`tests/spec/`) — A Python script that uses
    `prosemirror-py` to generate expected JSON outputs. These can be consumed
    by Rust tests for cross-implementation validation:
 

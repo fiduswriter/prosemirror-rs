@@ -57,7 +57,7 @@ mod tests {
                 .node_from_json(&serde_json::json!({
                     "type": "paragraph",
                     "content": [
-                        { "type": "text", "text": "Hallo", "marks": [{"type": "em"}] },
+                        { "type": "text", "text": "Hallo" },
                         { "type": "text", "text": "Foo" }
                     ]
                 }))

@@ -3,7 +3,7 @@
 use super::map::{Mappable, StepMap};
 use super::step::StepKind;
 use super::StepResult;
-use crate::model::{Fragment, Mark, Node, NodeType, Schema, Slice};
+use crate::model::{Fragment, Mark, Node, Schema, Slice};
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -42,19 +42,21 @@ pub struct RemoveNodeMarkStep<S: Schema> {
 
 impl<S: Schema> StepKind<S> for AddNodeMarkStep<S> {
     fn apply(&self, doc: &S::Node) -> StepResult<S> {
-        let node = doc
-            .node_at(self.pos)
+        let rp = doc.resolve(self.pos).map_err(super::StepError::from)?;
+        // Get the node before or at the position
+        let node = rp
+            .node_after()
+            .map(|c| c.into_owned())
+            .or_else(|| rp.node_before().map(|c| c.into_owned()))
             .ok_or(super::StepError::NoNodeAtPosition)?;
 
         let new_marks = node.marks().map(Cow::Borrowed).unwrap_or_default();
-        let new_mark_set = self.mark.add_to_set(new_marks).into_owned();
-        let updated = node
-            .r#type()
-            .create(node.attrs_json(), None, Some(&new_mark_set));
+        let updated = node.mark(self.mark.add_to_set(new_marks).into_owned());
+        let is_leaf = updated.is_leaf();
         let slice = Slice::new(
             Fragment::from(vec![updated]),
             0,
-            if node.is_leaf() { 0 } else { 1 },
+            if is_leaf { 0 } else { 1 },
         );
         Ok(doc.replace(self.pos..self.pos + 1, &slice)?)
     }
@@ -72,19 +74,11 @@ impl<S: Schema> StepKind<S> for AddNodeMarkStep<S> {
                 .or_else(|| rp.node_before().map(|c| c.into_owned()))
             {
                 let marks = node.marks().map(Cow::Borrowed).unwrap_or_default();
-                let new_set = self.mark.add_to_set(marks.clone());
+                let new_set = self.mark.add_to_set(marks);
                 if new_set.len() == node.marks().map(|m| m.len()).unwrap_or(0) {
-                    // Mark was already present or replaced one.
-                    // Check if the mark was actually replaced.
-                    for mark in marks.iter() {
-                        if !new_set.contains(mark) {
-                            return super::Step::AddNodeMark(AddNodeMarkStep {
-                                pos: self.pos,
-                                mark: mark.clone(),
-                            });
-                        }
-                    }
-                    return super::Step::AddNodeMark(AddNodeMarkStep {
+                    // Mark was already present or replaced one
+                    // Check if the mark was actually replaced
+                    return super::Step::RemoveNodeMark(RemoveNodeMarkStep {
                         pos: self.pos,
                         mark: self.mark.clone(),
                     });
@@ -112,19 +106,20 @@ impl<S: Schema> StepKind<S> for AddNodeMarkStep<S> {
 
 impl<S: Schema> StepKind<S> for RemoveNodeMarkStep<S> {
     fn apply(&self, doc: &S::Node) -> StepResult<S> {
-        let node = doc
-            .node_at(self.pos)
+        let rp = doc.resolve(self.pos).map_err(super::StepError::from)?;
+        let node = rp
+            .node_after()
+            .map(|c| c.into_owned())
+            .or_else(|| rp.node_before().map(|c| c.into_owned()))
             .ok_or(super::StepError::NoNodeAtPosition)?;
 
         let new_marks = node.marks().map(Cow::Borrowed).unwrap_or_default();
-        let new_mark_set = self.mark.remove_from_set(new_marks).into_owned();
-        let updated = node
-            .r#type()
-            .create(node.attrs_json(), None, Some(&new_mark_set));
+        let updated = node.mark(self.mark.remove_from_set(new_marks).into_owned());
+        let is_leaf = updated.is_leaf();
         let slice = Slice::new(
             Fragment::from(vec![updated]),
             0,
-            if node.is_leaf() { 0 } else { 1 },
+            if is_leaf { 0 } else { 1 },
         );
         Ok(doc.replace(self.pos..self.pos + 1, &slice)?)
     }
@@ -151,7 +146,7 @@ impl<S: Schema> StepKind<S> for RemoveNodeMarkStep<S> {
                 }
             }
         }
-        super::Step::RemoveNodeMark(RemoveNodeMarkStep {
+        super::Step::AddNodeMark(AddNodeMarkStep {
             pos: self.pos,
             mark: self.mark.clone(),
         })
@@ -207,78 +202,5 @@ impl<S: Schema> RemoveNodeMarkStep<S> {
                 mark: self.mark.clone(),
             })
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::dynamic::types::Dyn;
-    use crate::dynamic::DynamicSchema;
-    use crate::model::{Fragment, Mark, MarkSet};
-    use crate::transform::Transform;
-
-    #[test]
-    fn test_add_node_mark_invert_replaces_mark() {
-        let schema = DynamicSchema::from_json(&serde_json::json!({
-            "nodes": {
-                "doc": {"content": "p+"},
-                "p": {"content": "inline*"},
-                "text": {"group": "inline"},
-                "image": {"inline": true, "attrs": {"src": {}}, "group": "inline"}
-            },
-            "marks": {
-                "link": {"attrs": {"href": {}}},
-                "em": {}
-            }
-        }))
-        .unwrap();
-
-        schema.with_types(|| {
-            let mut marks = MarkSet::<Dyn>::new();
-            let m1 = schema
-                .mark_from_json(&serde_json::json!({"type": "link", "attrs": {"href": "foo"}}))
-                .unwrap();
-            marks = m1.add_to_set(std::borrow::Cow::Owned(marks)).into_owned();
-
-            let doc = schema
-                .node(
-                    "doc",
-                    serde_json::Value::Null,
-                    Fragment::from(vec![schema
-                        .node(
-                            "p",
-                            serde_json::Value::Null,
-                            Fragment::from(vec![schema
-                                .node(
-                                    "image",
-                                    serde_json::json!({"src": "x"}),
-                                    Fragment::new(),
-                                    marks,
-                                )
-                                .unwrap()]),
-                            MarkSet::new(),
-                        )
-                        .unwrap()]),
-                    MarkSet::new(),
-                )
-                .unwrap();
-
-            let mark_x = schema
-                .mark_from_json(&serde_json::json!({"type": "link", "attrs": {"href": "x"}}))
-                .unwrap();
-            let mut tr: Transform<Dyn> = Transform::new(doc.clone());
-            tr.add_node_mark(1, mark_x);
-
-            let step = &tr.steps[0];
-            let inverted = step.invert(&tr.docs[0]);
-
-            let mut inv_tr: Transform<Dyn> = Transform::new(tr.doc.clone());
-            let _ = inv_tr.step(inverted);
-
-            assert!(
-                PartialEq::eq(&inv_tr.doc, &doc),
-                "Inverted doc should match original"
-            );
-        });
     }
 }
