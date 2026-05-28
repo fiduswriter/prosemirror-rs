@@ -19,11 +19,8 @@ import { spawnSync } from "child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Upstream test directories (relative to repo root)
-const UPSTREAM_DIRS = [
-  "../../prosemirror-model/test",
-  "../../prosemirror-transform/test",
-];
+// Upstream test directories (relative to this script)
+const UPSTREAM_DIRS = ["tests/upstream"];
 
 // Files to exclude (DOM-related tests — no DOM in Rust)
 const EXCLUDE_FILES = new Set(["test-dom.js", "test-dom.ts"]);
@@ -209,6 +206,10 @@ function main() {
     stdio: "inherit",
   });
 
+  if (result.signal) {
+    console.error(`\nTest process terminated by signal: ${result.signal}`);
+    process.exit(1);
+  }
   process.exit(result.status ?? 0);
 }
 
