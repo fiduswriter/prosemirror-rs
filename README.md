@@ -284,6 +284,26 @@ PYTHONPATH=tests/shim pytest tests/upstream/ -v
 
 > **Note:** `test_dom.py` was removed because DOM serialization is out of scope for this project.
 
+### Node.js upstream tests (against Rust shim)
+
+The `node/run-upstream-tests.mjs` script copies the upstream JavaScript test
+files from `../prosemirror-model/test/` and `../prosemirror-transform/test/`,
+rewrites their ES imports to CommonJS requires pointing at a local shim
+(`node/test-shim/`), and runs them with Mocha + `ist`.
+
+```bash
+cd node
+npm install
+npm run build:release
+node run-upstream-tests.mjs
+```
+
+> **Note:** `test-dom.ts` is excluded because DOM serialization is out of scope.
+> The test suite is a work-in-progress: many tests currently fail because the
+> CJS shim does not yet fully replicate the upstream `prosemirror-model` and
+> `prosemirror-transform` APIs (e.g. `Schema.spec.nodes` Map-like methods,
+> `NodeType.createChecked`, and static helpers such as `Node.fromJSON`).
+
 ### Python-generated fixtures
 
 `tests/spec/` contains a Python script that uses `prosemirror-py` to generate

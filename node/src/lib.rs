@@ -1,42 +1,8 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+mod model;
+mod transform;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use prosemirror::dynamic::types::Dyn;
-use prosemirror::dynamic::{DynamicNode, DynamicSchema};
-use prosemirror::transform::Step;
-
-// ---------------------------------------------------------------------------
-// Schema cache
-// ---------------------------------------------------------------------------
-
-/// Global cache mapping raw schema-JSON strings → parsed schemas.
-///
-/// Keyed by the exact bytes of the JSON string, so two textually-identical
-/// strings always hit the same entry.  Parsing a schema is the expensive
-/// part of Editor construction; once cached, every subsequent `Editor::new`
-/// for the same schema is just an `Arc` clone + a document parse.
-static SCHEMA_CACHE: OnceLock<Mutex<HashMap<String, Arc<DynamicSchema>>>> = OnceLock::new();
-
-fn get_or_create_schema(schema_json: &str) -> napi::Result<Arc<DynamicSchema>> {
-    let cache = SCHEMA_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    // Recover from a poisoned lock (would only happen if a previous thread panicked mid-insert).
-    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
-
-    if let Some(existing) = guard.get(schema_json) {
-        return Ok(Arc::clone(existing));
-    }
-
-    let schema_val: serde_json::Value = serde_json::from_str(schema_json)
-        .map_err(|e| napi::Error::new(Status::InvalidArg, format!("Invalid schema JSON: {e}")))?;
-    let schema = DynamicSchema::from_json(&schema_val)
-        .map_err(|e| napi::Error::new(Status::InvalidArg, format!("Invalid schema: {e}")))?;
-
-    let arc = Arc::new(schema);
-    guard.insert(schema_json.to_owned(), Arc::clone(&arc));
-    Ok(arc)
-}
 
 // ---------------------------------------------------------------------------
 // Editor
@@ -56,9 +22,7 @@ fn get_or_create_schema(schema_json: &str) -> napi::Result<Arc<DynamicSchema>> {
 /// same schema therefore only pays the parse cost once.
 #[napi]
 pub struct Editor {
-    schema: Arc<DynamicSchema>,
-    doc: DynamicNode,
-    version: usize,
+    inner: prosemirror::editor::Editor,
 }
 
 #[napi]
@@ -75,20 +39,9 @@ impl Editor {
     ///   document does not conform to the ProseMirror spec.
     #[napi(constructor)]
     pub fn new(schema_json: String, doc_json: String) -> napi::Result<Self> {
-        let schema = get_or_create_schema(&schema_json)?;
-
-        let doc_val: serde_json::Value = serde_json::from_str(&doc_json).map_err(|e| {
-            napi::Error::new(Status::InvalidArg, format!("Invalid document JSON: {e}"))
-        })?;
-        let doc = schema
-            .node_from_json(&doc_val)
-            .map_err(|e| napi::Error::new(Status::InvalidArg, format!("Invalid document: {e}")))?;
-
-        Ok(Editor {
-            schema,
-            doc,
-            version: 0,
-        })
+        let inner = prosemirror::editor::Editor::new(&schema_json, &doc_json)
+            .map_err(|e| napi::Error::new(Status::InvalidArg, e))?;
+        Ok(Editor { inner })
     }
 
     /// Apply a single step to the document.
@@ -99,24 +52,9 @@ impl Editor {
     /// @throws {Error} If `stepJson` is not valid JSON or not a recognised step type.
     #[napi]
     pub fn apply_step(&mut self, step_json: String) -> napi::Result<bool> {
-        let result = {
-            let schema = &self.schema;
-            let doc = &self.doc;
-            schema.with_types(|| -> napi::Result<Option<DynamicNode>> {
-                let step: Step<Dyn> = serde_json::from_str(&step_json).map_err(|e| {
-                    napi::Error::new(Status::InvalidArg, format!("Invalid step JSON: {e}"))
-                })?;
-                Ok(step.apply(doc).ok())
-            })
-        }?;
-
-        if let Some(new_doc) = result {
-            self.doc = new_doc;
-            self.version += 1;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        self.inner
+            .apply_step(&step_json)
+            .map_err(|e| napi::Error::new(Status::InvalidArg, e))
     }
 
     /// Apply a batch of steps supplied as a single JSON array string, atomically.
@@ -139,50 +77,9 @@ impl Editor {
     /// @throws {Error} If `stepsJson` is not a valid JSON array of steps.
     #[napi]
     pub fn apply_steps_json(&mut self, steps_json: String) -> napi::Result<bool> {
-        // Phase 1: parse the whole array before touching the document.
-        let steps: Vec<Step<Dyn>> = {
-            let schema = &self.schema;
-            schema.with_types(|| {
-                serde_json::from_str(&steps_json).map_err(|e| {
-                    napi::Error::new(Status::InvalidArg, format!("Invalid steps JSON: {e}"))
-                })
-            })?
-        };
-
-        // A snapshot is only needed when there are at least two steps: with a
-        // single step the document is either untouched (failure) or cleanly
-        // advanced (success), so no previously-committed state can need rolling back.
-        let mut snapshot: Option<(DynamicNode, usize)> = if steps.len() > 1 {
-            Some((self.doc.clone(), self.version))
-        } else {
-            None
-        };
-
-        // Phase 2: apply each step; roll back and return false on the first failure.
-        for step in steps {
-            let result = {
-                let schema = &self.schema;
-                let doc = &self.doc;
-                schema.with_types(|| step.apply(doc))
-            };
-            match result {
-                Ok(new_doc) => {
-                    self.doc = new_doc;
-                    self.version += 1;
-                }
-                Err(_) => {
-                    // Option::take moves the contents out via &mut self rather
-                    // than an unconditional move, which the borrow checker would
-                    // reject inside a loop body.
-                    if let Some((snap_doc, snap_version)) = snapshot.take() {
-                        self.doc = snap_doc;
-                        self.version = snap_version;
-                    }
-                    return Ok(false);
-                }
-            }
-        }
-        Ok(true)
+        self.inner
+            .apply_steps_json(&steps_json)
+            .map_err(|e| napi::Error::new(Status::InvalidArg, e))
     }
 
     /// Apply a batch of steps from a JS array of JSON strings, atomically.
@@ -205,45 +102,9 @@ impl Editor {
     /// @throws {Error} If any element is not valid step JSON.
     #[napi]
     pub fn apply_steps(&mut self, steps: Vec<String>) -> napi::Result<bool> {
-        // Parse all steps up-front so that a bad step throws
-        // before any mutation takes place.
-        let parsed: Vec<Step<Dyn>> = {
-            let schema = &self.schema;
-            schema.with_types(|| {
-                steps
-                    .iter()
-                    .map(|s| {
-                        serde_json::from_str::<Step<Dyn>>(s).map_err(|e| {
-                            napi::Error::new(Status::InvalidArg, format!("Invalid step JSON: {e}"))
-                        })
-                    })
-                    .collect::<napi::Result<Vec<_>>>()
-            })?
-        };
-
-        // Snapshot the pre-batch state so we can roll back cheaply.
-        let snapshot = self.doc.clone();
-        let snapshot_version = self.version;
-
-        for step in parsed {
-            let result = {
-                let schema = &self.schema;
-                let doc = &self.doc;
-                schema.with_types(|| step.apply(doc))
-            };
-            match result {
-                Ok(new_doc) => {
-                    self.doc = new_doc;
-                    self.version += 1;
-                }
-                Err(_) => {
-                    self.doc = snapshot;
-                    self.version = snapshot_version;
-                    return Ok(false);
-                }
-            }
-        }
-        Ok(true)
+        self.inner
+            .apply_steps(&steps)
+            .map_err(|e| napi::Error::new(Status::InvalidArg, e))
     }
 
     /// Reset the document to a new state, reusing the already-parsed schema.
@@ -258,16 +119,9 @@ impl Editor {
     ///   the schema.
     #[napi]
     pub fn reset(&mut self, doc_json: String) -> napi::Result<()> {
-        let doc_val: serde_json::Value = serde_json::from_str(&doc_json).map_err(|e| {
-            napi::Error::new(Status::InvalidArg, format!("Invalid document JSON: {e}"))
-        })?;
-        let doc = self
-            .schema
-            .node_from_json(&doc_val)
-            .map_err(|e| napi::Error::new(Status::InvalidArg, format!("Invalid document: {e}")))?;
-        self.doc = doc;
-        self.version = 0;
-        Ok(())
+        self.inner
+            .reset(&doc_json)
+            .map_err(|e| napi::Error::new(Status::InvalidArg, e))
     }
 
     /// Serialize the current document to a JSON string.
@@ -284,12 +138,9 @@ impl Editor {
     /// @returns The document as a compact JSON string.
     #[napi]
     pub fn doc_json(&self, skip_defaults: Option<bool>) -> napi::Result<String> {
-        let val = self
-            .schema
-            .with_types(|| self.doc.to_json(skip_defaults.unwrap_or(false)));
-        serde_json::to_string(&val).map_err(|e| {
-            napi::Error::new(Status::GenericFailure, format!("Serialization error: {e}"))
-        })
+        self.inner
+            .doc_json(skip_defaults.unwrap_or(false))
+            .map_err(|e| napi::Error::new(Status::GenericFailure, e))
     }
 
     /// Number of steps successfully applied since construction (or last `reset()`).
@@ -297,6 +148,6 @@ impl Editor {
     /// Use as a document version counter in collaborative-editing protocols.
     #[napi(getter)]
     pub fn version(&self) -> u32 {
-        self.version as u32
+        self.inner.version() as u32
     }
 }

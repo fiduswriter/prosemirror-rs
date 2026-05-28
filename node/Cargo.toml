@@ -19,7 +19,7 @@ name = "prosemirror_rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = { version = "2", features = ["napi4"] }
+napi = { version = "2", features = ["napi4", "serde-json"] }
 napi-derive = "2"
 prosemirror = { path = ".." }
 serde_json = "1"

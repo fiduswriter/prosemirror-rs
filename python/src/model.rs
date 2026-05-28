@@ -119,14 +119,6 @@ pub fn json_to_py<'py>(py: Python<'py>, val: &serde_json::Value) -> PyResult<Bou
     }
 }
 
-fn wrap_marks(name: &str, marks: &MarkSet<Dyn>) -> String {
-    let mut result = name.to_string();
-    for m in marks.iter().rev() {
-        result = format!("{}({})", m.type_name, result);
-    }
-    result
-}
-
 pub fn extract_fragment(obj: &Bound<'_, PyAny>, schema: &DynamicSchema) -> PyResult<Fragment<Dyn>> {
     if obj.is_none() {
         return Ok(Fragment::new());
@@ -755,7 +747,7 @@ impl PyFragment {
             self.inner
                 .children()
                 .iter()
-                .map(|n| node_to_debug_str(n))
+                .map(|n| n.to_debug_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         });
@@ -876,29 +868,6 @@ impl PySlice {
 // ---------------------------------------------------------------------------
 // Node
 // ---------------------------------------------------------------------------
-
-fn node_to_debug_str(node: &DynamicNode) -> String {
-    let name = &node.type_name;
-    if let Some(tn) = node.text_node() {
-        let text = tn.text.as_str().to_string();
-        return wrap_marks(&format!("\"{text}\""), &node.marks);
-    }
-    if let Some(content) = node.content() {
-        let inner = content
-            .children()
-            .iter()
-            .map(node_to_debug_str)
-            .collect::<Vec<_>>()
-            .join(", ");
-        if inner.is_empty() {
-            wrap_marks(name, &node.marks)
-        } else {
-            wrap_marks(&format!("{name}({inner})"), &node.marks)
-        }
-    } else {
-        wrap_marks(name, &node.marks)
-    }
-}
 
 #[pyclass(name = "Node", dict)]
 pub struct PyNode {
@@ -1159,7 +1128,7 @@ impl PyNode {
     }
 
     fn __str__(&self) -> String {
-        self.schema.with_types(|| node_to_debug_str(&self.inner))
+        self.schema.with_types(|| self.inner.to_debug_string())
     }
 
     fn __repr__(&self) -> String {

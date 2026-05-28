@@ -830,6 +830,41 @@ impl DynamicNode {
 
         obj
     }
+
+    /// Return a ProseMirror-style debug string for this node.
+    ///
+    /// Format: `type_name(child1, child2)` with marks wrapped outer-most.
+    /// Used by language binding `__str__` / `toString` implementations.
+    pub fn to_debug_string(&self) -> String {
+        fn wrap_marks(name: &str, marks: &crate::model::MarkSet<Dyn>) -> String {
+            let mut result = name.to_string();
+            for m in marks.iter().rev() {
+                result = format!("{}({})", m.type_name, result);
+            }
+            result
+        }
+
+        let name = &self.type_name;
+        if let Some(tn) = self.text_node() {
+            let text = tn.text.as_str().to_string();
+            return wrap_marks(&format!("\"{text}\""), &self.marks);
+        }
+        if let Some(content) = self.content() {
+            let inner = content
+                .children()
+                .iter()
+                .map(|child| child.to_debug_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            if inner.is_empty() {
+                wrap_marks(name, &self.marks)
+            } else {
+                wrap_marks(&format!("{name}({inner})"), &self.marks)
+            }
+        } else {
+            wrap_marks(name, &self.marks)
+        }
+    }
 }
 
 fn attrs_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {

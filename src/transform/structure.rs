@@ -1,6 +1,6 @@
 //! Structure analysis utilities for document transformations.
 
-use crate::model::{ContentMatch, Node, NodeType, ResolvedPos, Schema, Slice};
+use crate::model::{ContentMatch, Node, NodeType, ResolveErr, ResolvedPos, Schema, Slice};
 use serde_json::Value;
 
 /// A wrapper descriptor for `Transform.wrap`, matching upstream JS.
@@ -432,6 +432,17 @@ impl<'a, S: Schema> NodeRange<'a, S> {
     /// Create a new NodeRange
     pub fn new(from: ResolvedPos<'a, S>, to: ResolvedPos<'a, S>, depth: usize) -> Self {
         NodeRange { from, to, depth }
+    }
+
+    /// Resolve two positions in a document and build a `NodeRange`.
+    ///
+    /// This is a convenience wrapper around `ResolvedPos::resolve` +
+    /// `shared_depth` that is used by both language bindings.
+    pub fn resolve(doc: &'a S::Node, from: usize, to: usize) -> Result<Self, ResolveErr> {
+        let from_rp = ResolvedPos::resolve(doc, from)?;
+        let depth = from_rp.shared_depth(to);
+        let to_rp = ResolvedPos::resolve(doc, to)?;
+        Ok(NodeRange::new(from_rp, to_rp, depth))
     }
 
     /// The start position of the range

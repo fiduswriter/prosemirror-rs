@@ -5,6 +5,7 @@ Cargo.lock
 .envrc.local
 node_modules/
 node/prosemirror-rs.*.node
+node/.upstream-tests/
 __pycache__/
 *.pyc
 *.so

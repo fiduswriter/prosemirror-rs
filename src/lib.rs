@@ -11,6 +11,7 @@
 extern crate derive_new;
 
 pub mod dynamic;
+pub mod editor;
 pub mod model;
 pub mod transform;
 pub mod util;

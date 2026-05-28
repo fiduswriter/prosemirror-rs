@@ -9,11 +9,12 @@ pub fn from<R: RangeBounds<usize>>(range: &R) -> usize {
 }
 
 pub fn to<R: RangeBounds<usize>>(range: &R, max: usize) -> usize {
-    match range.end_bound() {
+    let raw = match range.end_bound() {
         Bound::Unbounded => max,
         Bound::Included(x) => x + 1,
         Bound::Excluded(x) => *x,
-    }
+    };
+    raw.min(max)
 }
 
 pub fn split_at_utf16(text: &str, mut index: usize) -> (&str, &str) {

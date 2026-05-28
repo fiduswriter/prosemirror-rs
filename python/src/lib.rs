@@ -1,46 +1,8 @@
 mod model;
 mod transform;
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
-
-use prosemirror::dynamic::types::Dyn;
-use prosemirror::dynamic::{DynamicNode, DynamicSchema};
-use prosemirror::transform::Step;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-
-// ---------------------------------------------------------------------------
-// Schema cache
-// ---------------------------------------------------------------------------
-
-/// Global cache mapping raw schema-JSON strings → parsed schemas.
-///
-/// Keyed by the exact bytes of the JSON string, so two textually-identical
-/// strings always hit the same entry.  Parsing a schema is the expensive
-/// part of Editor construction; once cached, every subsequent `Editor::new`
-/// for the same schema is just an `Arc` clone + a document parse.
-static SCHEMA_CACHE: OnceLock<Mutex<HashMap<String, Arc<DynamicSchema>>>> = OnceLock::new();
-
-fn get_or_create_schema(schema_json: &str) -> PyResult<Arc<DynamicSchema>> {
-    let cache = SCHEMA_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    // `unwrap_or_else(|e| e.into_inner())` recovers from a poisoned lock
-    // (which would only happen if a previous thread panicked mid-insert).
-    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
-
-    if let Some(existing) = guard.get(schema_json) {
-        return Ok(Arc::clone(existing));
-    }
-
-    let schema_val: serde_json::Value = serde_json::from_str(schema_json)
-        .map_err(|e| PyValueError::new_err(format!("Invalid schema JSON: {e}")))?;
-    let schema = DynamicSchema::from_json(&schema_val)
-        .map_err(|e| PyValueError::new_err(format!("Invalid schema: {e}")))?;
-
-    let arc = Arc::new(schema);
-    guard.insert(schema_json.to_owned(), Arc::clone(&arc));
-    Ok(arc)
-}
 
 // ---------------------------------------------------------------------------
 // Editor
@@ -59,10 +21,8 @@ fn get_or_create_schema(schema_json: &str) -> PyResult<Arc<DynamicSchema>> {
 /// schema-JSON string.  Constructing many ``Editor`` objects that share the
 /// same schema therefore only pays the parse cost once.
 #[pyclass(module = "prosemirror_rs")]
-struct Editor {
-    schema: Arc<DynamicSchema>,
-    doc: DynamicNode,
-    version: usize,
+pub struct Editor {
+    inner: prosemirror::editor::Editor,
 }
 
 #[pymethods]
@@ -80,19 +40,9 @@ impl Editor {
     #[new]
     #[pyo3(signature = (schema_json, doc_json))]
     fn new(schema_json: &str, doc_json: &str) -> PyResult<Self> {
-        let schema = get_or_create_schema(schema_json)?;
-
-        let doc_val: serde_json::Value = serde_json::from_str(doc_json)
-            .map_err(|e| PyValueError::new_err(format!("Invalid document JSON: {e}")))?;
-        let doc = schema
-            .node_from_json(&doc_val)
-            .map_err(|e| PyValueError::new_err(format!("Invalid document: {e}")))?;
-
-        Ok(Editor {
-            schema,
-            doc,
-            version: 0,
-        })
+        let inner = prosemirror::editor::Editor::new(schema_json, doc_json)
+            .map_err(|e| PyValueError::new_err(e))?;
+        Ok(Editor { inner })
     }
 
     /// Apply a single step to the document.
@@ -103,23 +53,9 @@ impl Editor {
     /// :raises ValueError: If *step_json* is not valid JSON or not a
     ///     recognised step type.
     fn apply_step(&mut self, step_json: &str) -> PyResult<bool> {
-        let result = {
-            let schema = &self.schema;
-            let doc = &self.doc;
-            schema.with_types(|| -> PyResult<Option<DynamicNode>> {
-                let step: Step<Dyn> = serde_json::from_str(step_json)
-                    .map_err(|e| PyValueError::new_err(format!("Invalid step JSON: {e}")))?;
-                Ok(step.apply(doc).ok())
-            })
-        }?;
-
-        if let Some(new_doc) = result {
-            self.doc = new_doc;
-            self.version += 1;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        self.inner
+            .apply_step(step_json)
+            .map_err(|e| PyValueError::new_err(e))
     }
 
     /// Apply a batch of steps supplied as a single JSON array string, atomically.
@@ -142,49 +78,9 @@ impl Editor {
     ///     step failed (document and version are rolled back entirely).
     /// :raises ValueError: If *steps_json* is not a valid JSON array of steps.
     fn apply_steps_json(&mut self, steps_json: &str) -> PyResult<bool> {
-        // Phase 1: parse the whole array before touching the document.
-        let steps: Vec<Step<Dyn>> = {
-            let schema = &self.schema;
-            schema.with_types(|| {
-                serde_json::from_str(steps_json)
-                    .map_err(|e| PyValueError::new_err(format!("Invalid steps JSON: {e}")))
-            })?
-        };
-
-        // A snapshot is only needed when there are at least two steps: with a
-        // single step the document is either untouched (failure) or cleanly
-        // advanced (success), so no previously-committed state can need rolling back.
-        let mut snapshot: Option<(DynamicNode, usize)> = if steps.len() > 1 {
-            Some((self.doc.clone(), self.version))
-        } else {
-            None
-        };
-
-        // Phase 2: apply each step; roll back and return false on the first failure.
-        for step in steps {
-            let result = {
-                let schema = &self.schema;
-                let doc = &self.doc;
-                schema.with_types(|| step.apply(doc))
-            };
-            match result {
-                Ok(new_doc) => {
-                    self.doc = new_doc;
-                    self.version += 1;
-                }
-                Err(_) => {
-                    // Option::take moves the contents out via &mut self rather
-                    // than an unconditional move, which the borrow checker would
-                    // reject inside a loop body.
-                    if let Some((snap_doc, snap_version)) = snapshot.take() {
-                        self.doc = snap_doc;
-                        self.version = snap_version;
-                    }
-                    return Ok(false);
-                }
-            }
-        }
-        Ok(true)
+        self.inner
+            .apply_steps_json(steps_json)
+            .map_err(|e| PyValueError::new_err(e))
     }
 
     /// Apply a batch of steps from a Python list of JSON strings, atomically.
@@ -206,51 +102,9 @@ impl Editor {
     ///     step failed (document and version are rolled back entirely).
     /// :raises ValueError: If any element is not valid step JSON.
     fn apply_steps(&mut self, steps: Vec<String>) -> PyResult<bool> {
-        // Parse all steps up-front so that a bad step raises ValueError
-        // before any mutation takes place.
-        let parsed: Vec<Step<Dyn>> = {
-            let schema = &self.schema;
-            schema.with_types(|| {
-                steps
-                    .iter()
-                    .map(|s| {
-                        serde_json::from_str::<Step<Dyn>>(s)
-                            .map_err(|e| PyValueError::new_err(format!("Invalid step JSON: {e}")))
-                    })
-                    .collect::<PyResult<Vec<_>>>()
-            })?
-        };
-
-        // A snapshot is only needed when there are at least two steps: with a
-        // single step the document is either untouched (failure) or cleanly
-        // advanced (success), so no previously-committed state can need rolling back.
-        let mut snapshot: Option<(DynamicNode, usize)> = if parsed.len() > 1 {
-            Some((self.doc.clone(), self.version))
-        } else {
-            None
-        };
-
-        for step in parsed {
-            let result = {
-                let schema = &self.schema;
-                let doc = &self.doc;
-                schema.with_types(|| step.apply(doc))
-            };
-            match result {
-                Ok(new_doc) => {
-                    self.doc = new_doc;
-                    self.version += 1;
-                }
-                Err(_) => {
-                    if let Some((snap_doc, snap_version)) = snapshot.take() {
-                        self.doc = snap_doc;
-                        self.version = snap_version;
-                    }
-                    return Ok(false);
-                }
-            }
-        }
-        Ok(true)
+        self.inner
+            .apply_steps(&steps)
+            .map_err(|e| PyValueError::new_err(e))
     }
 
     /// Reset the document to a new state, reusing the already-parsed schema.
@@ -264,15 +118,9 @@ impl Editor {
     /// :raises ValueError: If *doc_json* is not valid JSON or does not
     ///     conform to the schema.
     fn reset(&mut self, doc_json: &str) -> PyResult<()> {
-        let doc_val: serde_json::Value = serde_json::from_str(doc_json)
-            .map_err(|e| PyValueError::new_err(format!("Invalid document JSON: {e}")))?;
-        let doc = self
-            .schema
-            .node_from_json(&doc_val)
-            .map_err(|e| PyValueError::new_err(format!("Invalid document: {e}")))?;
-        self.doc = doc;
-        self.version = 0;
-        Ok(())
+        self.inner
+            .reset(doc_json)
+            .map_err(|e| PyValueError::new_err(e))
     }
 
     /// Serialize the current document to a JSON string.
@@ -289,9 +137,9 @@ impl Editor {
     /// :returns: The document as a compact JSON string.
     #[pyo3(signature = (skip_defaults = false))]
     fn doc_json(&self, skip_defaults: bool) -> PyResult<String> {
-        let val = self.schema.with_types(|| self.doc.to_json(skip_defaults));
-        serde_json::to_string(&val)
-            .map_err(|e| PyValueError::new_err(format!("Serialization error: {e}")))
+        self.inner
+            .doc_json(skip_defaults)
+            .map_err(|e| PyValueError::new_err(e))
     }
 
     /// Number of steps successfully applied since construction (or last
@@ -300,7 +148,7 @@ impl Editor {
     /// Use as a document version counter in collaborative-editing protocols.
     #[getter]
     fn version(&self) -> usize {
-        self.version
+        self.inner.version()
     }
 }
 
