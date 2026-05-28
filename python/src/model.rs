@@ -157,19 +157,7 @@ fn extract_markset(obj: &Bound<'_, PyAny>) -> PyResult<MarkSet<Dyn>> {
             }
             marks.push(mark);
         }
-        let mut mark_set = MarkSet::new();
-        if let Some(schema) = schema_opt {
-            schema.with_types(|| {
-                for mark in &marks {
-                    mark_set.add(mark);
-                }
-            });
-        } else {
-            for mark in &marks {
-                mark_set.add(mark);
-            }
-        }
-        return Ok(mark_set);
+        return Ok(MarkSet::from_vec(marks));
     }
     Err(PyValueError::new_err("Expected MarkSet or list of Mark"))
 }
@@ -943,7 +931,7 @@ impl PyNode {
     #[getter]
     fn text(&self) -> Option<String> {
         self.schema
-            .with_types(|| self.inner.text_node().map(|tn| tn.text.content.clone()))
+            .with_types(|| self.inner.text_node().map(|tn| tn.text.as_str().to_owned()))
     }
 
     #[getter]
@@ -954,6 +942,28 @@ impl PyNode {
     #[getter]
     fn child_count(&self) -> usize {
         self.schema.with_types(|| self.inner.child_count())
+    }
+
+    #[getter]
+    fn first_child(&self) -> PyResult<Option<PyNode>> {
+        let node = self
+            .schema
+            .with_types(|| self.inner.first_child().map(|n| (*n).clone()));
+        Ok(node.map(|n| PyNode {
+            schema: self.schema.clone(),
+            inner: n,
+        }))
+    }
+
+    #[getter]
+    fn last_child(&self) -> PyResult<Option<PyNode>> {
+        let node = self
+            .schema
+            .with_types(|| self.inner.last_child().map(|n| (*n).clone()));
+        Ok(node.map(|n| PyNode {
+            schema: self.schema.clone(),
+            inner: n,
+        }))
     }
 
     #[getter]

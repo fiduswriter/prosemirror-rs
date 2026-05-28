@@ -124,4 +124,17 @@ pub struct Leaf<A> {
 /// things like emphasis or being part of a link) are
 /// [tagged](#model.Mark.type) with type objects, which are
 /// instantiated once per `Schema`.
-pub trait MarkType: Copy + Clone + Debug + PartialEq + Eq + PartialOrd + Ord {}
+pub trait MarkType: Copy + Clone + Debug + PartialEq + Eq + PartialOrd + Ord {
+    /// The rank (definition order) of this mark type.
+    fn rank(self) -> usize {
+        0
+    }
+    /// Whether this mark type excludes another mark type.
+    fn excludes(self, _other: Self) -> bool {
+        false
+    }
+    /// Whether marks of this type are inclusive (active at the start/end of their range).
+    fn inclusive(self) -> bool {
+        true
+    }
+}

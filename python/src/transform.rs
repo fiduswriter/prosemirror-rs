@@ -585,7 +585,7 @@ impl PyTransform {
                         .unwrap_or_default()
                 })
             };
-            for mark in marks_to_remove {
+            for mark in marks_to_remove.into_iter().rev() {
                 let mut this = slf.borrow_mut();
                 schema.with_types(|| {
                     this.inner.remove_node_mark(pos, mark.inner);

@@ -301,11 +301,12 @@ PYTHONPATH=tests/shim pytest tests/upstream/ \
 | `test_diff.py` | 18 | 18 | 0 |
 | `test_structure.py` | 38 | 38 | 0 |
 | `test_replace_step.py` | 2 | 2 | 0 |
-| `test_step.py` | 19 | 18 | 1 |
-| `test_mark.py` | 21 | 16 | 5 |
-| `test_content.py` | 62 | 24 | 38 |
-| `test_trans.py` | 164 | 108 | 56 |
-| **Total** | **416** | **315** | **101** |
+| `test_step.py` | 19 | 19 | 0 |
+| `test_mark.py` | 21 | 21 | 0 |
+| `test_content.py` | 62 | 62 | 0 |
+| `test_node.py` | 40 | 31 | 9 |
+| `test_trans.py` | 164 | 158 | 6 |
+| **Total** | **456** | **441** | **15** |
 
 ### Python-generated fixtures
 

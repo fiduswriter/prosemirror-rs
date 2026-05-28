@@ -1,4 +1,4 @@
-use super::Schema;
+use super::{MarkType, Schema};
 use derivative::Derivative;
 use displaydoc::Display;
 use serde::{Deserialize, Serialize, Serializer};
@@ -26,6 +26,12 @@ impl<S: Schema> MarkSet<S> {
         }
     }
 
+    /// Create a MarkSet from a vector without reordering or deduping.
+    /// Only use this when the caller has already validated the input.
+    pub fn from_vec(content: Vec<S::Mark>) -> Self {
+        MarkSet { content }
+    }
+
     /// Check whether the set contains this exact mark
     pub fn contains(&self, mark: &S::Mark) -> bool {
         self.content.contains(mark)
@@ -51,33 +57,42 @@ impl<S: Schema> MarkSet<S> {
         self.content.iter()
     }
 
-    /// Add a mark to the set
+    /// Add a mark to the set, preserving rank order and handling exclusions.
     pub fn add(&mut self, mark: &S::Mark) {
-        match self
-            .content
-            .binary_search_by_key(&mark.r#type(), Mark::r#type)
-        {
-            Ok(index) => {
-                if &self.content[index] != mark {
-                    self.content[index] = mark.clone();
-                }
+        let mut copy = Vec::new();
+        let mut placed = false;
+        let mut modified = false;
+        for other in &self.content {
+            if mark == other {
+                return;
             }
-            Err(index) => {
-                self.content.insert(index, mark.clone());
+            if mark.r#type().excludes(other.r#type()) {
+                modified = true;
+                continue;
             }
+            if other.r#type().excludes(mark.r#type()) {
+                return;
+            }
+            if !placed && other.r#type().rank() > mark.r#type().rank() {
+                copy.push(mark.clone());
+                placed = true;
+                modified = true;
+            }
+            copy.push(other.clone());
+        }
+        if !placed {
+            copy.push(mark.clone());
+            modified = true;
+        }
+        if modified {
+            self.content = copy;
         }
     }
 
-    /// Remove a mark from the set
+    /// Remove an exact mark from the set
     pub fn remove(&mut self, mark: &S::Mark) {
-        match self
-            .content
-            .binary_search_by_key(&mark.r#type(), Mark::r#type)
-        {
-            Ok(index) => {
-                self.content.remove(index);
-            }
-            Err(_index) => {}
+        if let Some(index) = self.content.iter().position(|m| m == mark) {
+            self.content.remove(index);
         }
     }
 }
@@ -107,15 +122,15 @@ pub enum MarkSetError {
 
 impl<S: Schema> TryFrom<Vec<S::Mark>> for MarkSet<S> {
     type Error = MarkSetError;
-    fn try_from(mut value: Vec<S::Mark>) -> Result<Self, Self::Error> {
-        let len = value.len();
-        value.sort_by_key(|m| m.r#type());
-        value.dedup_by_key(|m| m.r#type());
-        if len > value.len() {
-            Err(MarkSetError::Duplicates)
-        } else {
-            Ok(MarkSet { content: value })
+    fn try_from(value: Vec<S::Mark>) -> Result<Self, Self::Error> {
+        let mut result = MarkSet::new();
+        for mark in value {
+            if result.contains(&mark) {
+                return Err(MarkSetError::Duplicates);
+            }
+            result.add(&mark);
         }
+        Ok(result)
     }
 }
 
@@ -141,40 +156,47 @@ pub trait Mark<S: Schema<Mark = Self>>:
     /// position. If this mark is already in the set, the set itself is returned. If any marks that
     /// are set to be exclusive with this mark are present, those are replaced by this one.
     fn add_to_set<'a>(&self, set: Cow<'a, MarkSet<S>>) -> Cow<'a, MarkSet<S>> {
-        match set
-            .content
-            .binary_search_by_key(&self.r#type(), Mark::r#type)
-        {
-            Ok(index) => {
-                if &set.content[index] == self {
-                    set
-                } else {
-                    let mut owned_set = set.into_owned();
-                    owned_set.content[index] = self.clone();
-                    Cow::Owned(owned_set)
-                }
+        let mut copy = Vec::new();
+        let mut placed = false;
+        let mut modified = false;
+        for other in set.iter() {
+            if self == other {
+                return set;
             }
-            Err(index) => {
-                let mut owned_set = set.into_owned();
-                owned_set.content.insert(index, self.clone());
-                Cow::Owned(owned_set)
+            if self.r#type().excludes(other.r#type()) {
+                modified = true;
+                continue;
             }
+            if other.r#type().excludes(self.r#type()) {
+                return set;
+            }
+            if !placed && other.r#type().rank() > self.r#type().rank() {
+                copy.push(self.clone());
+                placed = true;
+                modified = true;
+            }
+            copy.push(other.clone());
+        }
+        if !placed {
+            copy.push(self.clone());
+            modified = true;
+        }
+        if modified {
+            Cow::Owned(MarkSet { content: copy })
+        } else {
+            set
         }
     }
 
     /// Remove this mark from the given set, returning a new set. If this mark is not in the set,
     /// the set itself is returned.
     fn remove_from_set<'a>(&self, set: Cow<'a, MarkSet<S>>) -> Cow<'a, MarkSet<S>> {
-        match set
-            .content
-            .binary_search_by_key(&self.r#type(), Mark::r#type)
-        {
-            Ok(index) => {
-                let mut owned_set = set.into_owned();
-                owned_set.content.remove(index);
-                Cow::Owned(owned_set)
-            }
-            Err(_index) => set,
+        if let Some(index) = set.content.iter().position(|m| m == self) {
+            let mut owned_set = set.into_owned();
+            owned_set.content.remove(index);
+            Cow::Owned(owned_set)
+        } else {
+            set
         }
     }
 

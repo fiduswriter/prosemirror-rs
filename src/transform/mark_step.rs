@@ -20,7 +20,7 @@ where
         }
         mapped.push(child)
     }
-    Fragment::from(mapped)
+    Fragment::from_array(mapped)
 }
 
 fn map_fragment<S: Schema, F>(fragment: &Fragment<S>, f: &F) -> Fragment<S>
@@ -36,7 +36,7 @@ where
         }
         mapped.push(child)
     }
-    Fragment::from(mapped)
+    Fragment::from_array(mapped)
 }
 
 /// Adding a mark on some part of the document

@@ -40,7 +40,7 @@ pub struct SchemaSpec {
     pub nodes: IndexMap<String, NodeSpec>,
     /// Mark type specifications, keyed by name
     #[serde(default)]
-    pub marks: HashMap<String, MarkSpec>,
+    pub marks: IndexMap<String, MarkSpec>,
     /// The name of the top-level node type (default: "doc")
     #[serde(default = "default_top_node", alias = "topNode")]
     pub top_node: String,
@@ -308,6 +308,7 @@ impl DynamicSchema {
 
         let mut mark_types_data = Vec::new();
         let mut mark_type_map = HashMap::new();
+        let mut mark_groups: HashMap<String, Vec<usize>> = HashMap::new();
         for (name, mark_spec) in &spec.marks {
             let idx = mark_types_data.len();
             let attrs = mark_spec
@@ -324,30 +325,57 @@ impl DynamicSchema {
                         .collect()
                 })
                 .unwrap_or_default();
-            let excludes = match mark_spec.excludes.as_deref() {
-                Some("") => Vec::new(),
-                Some("_") => {
-                    let mut names: Vec<_> = spec.marks.keys().cloned().collect();
-                    names.sort();
-                    names
-                }
-                Some(excludes) => split_space_separated_names(excludes),
-                None => vec![name.clone()],
-            };
             let groups_list: Vec<String> = mark_spec
                 .group
                 .split(' ')
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .collect();
+            for group in &groups_list {
+                mark_groups.entry(group.clone()).or_default().push(idx);
+            }
             mark_type_map.insert(name.clone(), idx);
             mark_types_data.push(DynamicMarkTypeData {
                 name: name.clone(),
                 attrs,
                 inclusive: mark_spec.inclusive,
-                excludes,
+                excludes: Vec::new(),
+                excluded: Vec::new(),
                 groups: groups_list,
             });
+        }
+
+        // Resolve exclusions
+        let num_mark_types = mark_types_data.len();
+        for data in mark_types_data.iter_mut() {
+            let raw_excludes = match spec
+                .marks
+                .get(&data.name)
+                .and_then(|s| s.excludes.as_deref())
+            {
+                Some("") => Vec::new(),
+                Some("_") => {
+                    data.excluded = (0..num_mark_types).collect();
+                    continue;
+                }
+                Some(excludes) => split_space_separated_names(excludes),
+                None => vec![data.name.clone()],
+            };
+            data.excludes = raw_excludes.clone();
+            let mut seen = std::collections::HashSet::new();
+            for name in &raw_excludes {
+                if let Some(&target_idx) = mark_type_map.get(name) {
+                    if seen.insert(target_idx) {
+                        data.excluded.push(target_idx);
+                    }
+                } else if let Some(group_marks) = mark_groups.get(name) {
+                    for &target_idx in group_marks {
+                        if seen.insert(target_idx) {
+                            data.excluded.push(target_idx);
+                        }
+                    }
+                }
+            }
         }
 
         let store = Box::new(DynTypeStore {

@@ -163,13 +163,52 @@ impl<S: Schema> Transform<S> {
 
     /// Remove mark(s) from the inline content in the given range.
     pub fn remove_mark(&mut self, from: usize, to: usize, mark: Option<S::Mark>) -> &mut Self {
-        // Simplified: remove all matching marks
-        if let Some(mark) = mark {
-            let step = Step::RemoveMark(RemoveMarkStep {
-                span: crate::transform::Span { from, to },
-                mark,
-            });
-            let _ = self.maybe_step(step);
+        let mut matched: Vec<(S::Mark, usize, usize, usize)> = Vec::new();
+        let mut step = 0usize;
+        self.doc.nodes_between(
+            from,
+            to,
+            &mut |node, pos| {
+                if !node.is_inline() {
+                    return true;
+                }
+                step += 1;
+                let node_marks = node.marks().cloned().unwrap_or_default();
+                let to_remove: Vec<S::Mark> = match &mark {
+                    None => node_marks.iter().cloned().collect(),
+                    Some(mark) => {
+                        if mark.is_in_set(&node_marks) {
+                            vec![mark.clone()]
+                        } else {
+                            vec![]
+                        }
+                    }
+                };
+                if !to_remove.is_empty() {
+                    let end = (pos + node.node_size()).min(to);
+                    for style in to_remove {
+                        if let Some(found) =
+                            matched.iter_mut().find(|m| m.3 == step - 1 && m.0 == style)
+                        {
+                            found.2 = end;
+                            found.3 = step;
+                        } else {
+                            matched.push((style, from.max(pos), end, step));
+                        }
+                    }
+                }
+                false
+            },
+            0,
+        );
+        for item in matched {
+            let _ = self.maybe_step(Step::RemoveMark(RemoveMarkStep {
+                span: crate::transform::Span {
+                    from: item.1,
+                    to: item.2,
+                },
+                mark: item.0,
+            }));
         }
         self
     }

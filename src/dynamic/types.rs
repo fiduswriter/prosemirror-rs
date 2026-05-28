@@ -83,8 +83,10 @@ pub struct DynamicMarkTypeData {
     pub attrs: HashMap<String, serde_json::Value>,
     /// Whether this mark is inclusive
     pub inclusive: bool,
-    /// Which other mark types this one excludes
+    /// Which other mark types this one excludes (raw names from spec)
     pub excludes: Vec<String>,
+    /// Resolved excluded mark type indices
+    pub excluded: Vec<usize>,
     /// Groups this mark belongs to
     pub groups: Vec<String>,
 }
@@ -151,7 +153,31 @@ impl Hash for DynamicMarkType {
         self.idx.hash(state);
     }
 }
-impl MarkType for DynamicMarkType {}
+impl MarkType for DynamicMarkType {
+    fn rank(self) -> usize {
+        self.idx
+    }
+    fn excludes(self, other: Self) -> bool {
+        with_types(|store| {
+            store
+                .mark_types
+                .get(self.idx)
+                .map(|data| data.excluded.contains(&other.idx))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+    }
+    fn inclusive(self) -> bool {
+        with_types(|store| {
+            store
+                .mark_types
+                .get(self.idx)
+                .map(|data| data.inclusive)
+                .unwrap_or(true)
+        })
+        .unwrap_or(true)
+    }
+}
 
 /// A content match backed by a DFA, using an index into the schema's expr array.
 #[derive(Debug, Clone, Copy)]

@@ -1,4 +1,4 @@
-use super::{fragment::IndexError, Fragment, Node, Schema};
+use super::{fragment::IndexError, Fragment, Mark, MarkType, Node, Schema};
 use derivative::Derivative;
 use displaydoc::Display;
 use std::borrow::Cow;
@@ -283,15 +283,26 @@ impl<'a, S: Schema> ResolvedPos<'a, S> {
             None
         };
         let other = parent.maybe_child(index);
-        let (main, _other) = match (main, other) {
-            (Some(m), o) => (m, o),
-            (None, Some(o)) => (o, None),
+        let main = match (main, other) {
+            (Some(m), _) => m,
+            (None, Some(o)) => o,
             _ => return Vec::new(),
         };
-        let marks: Vec<S::Mark> = main
+        let other_marks = other.and_then(|o| o.marks());
+        let mut marks: Vec<S::Mark> = main
             .marks()
             .map(|m| m.iter().cloned().collect())
             .unwrap_or_default();
+        let mut i = 0;
+        while i < marks.len() {
+            if !marks[i].r#type().inclusive()
+                && other_marks.is_none_or(|om| !marks[i].is_in_set(om))
+            {
+                marks.remove(i);
+            } else {
+                i += 1;
+            }
+        }
         marks
     }
 
