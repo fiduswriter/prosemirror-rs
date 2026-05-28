@@ -88,6 +88,7 @@ ShimSchema.prototype = OrigSchema.prototype;
 // ---------------------------------------------------------------------------
 
 Node.fromJSON = Node.fromJson;
+Node.prototype.toJSON = Node.prototype.toJson;
 
 // Static properties that napi-rs can't expose directly
 Slice.empty = new Slice(Fragment.from([]), 0, 0);
@@ -156,6 +157,16 @@ Mark.sameSet = function (a, b) {
     if (!a[i].eq(b[i])) return false;
   }
   return true;
+};
+
+ContentMatch.parse = function (expr, nodeTypes) {
+  for (const key in nodeTypes) {
+    const val = nodeTypes[key];
+    if (val instanceof NodeType) {
+      return bindings.contentMatchParse(expr, val.schema);
+    }
+  }
+  throw new Error("No node types found in nodeTypes object");
 };
 
 module.exports = {

@@ -705,22 +705,28 @@ pub fn can_split(doc: &Node_, pos: u32, depth: Option<u32>, types: Option<Vec<Va
             })
             .collect()
     });
-    rs_can_split::<Dyn>(
-        &doc.inner,
-        pos as usize,
-        depth.map(|d| d as usize),
-        types.as_ref().map(|v| v.as_slice()),
-    )
+    doc.schema.with_types(|| {
+        rs_can_split::<Dyn>(
+            &doc.inner,
+            pos as usize,
+            depth.map(|d| d as usize),
+            types.as_ref().map(|v| v.as_slice()),
+        )
+    })
 }
 
 #[napi]
 pub fn can_join(doc: &Node_, pos: u32) -> bool {
-    rs_can_join::<Dyn>(&doc.inner, pos as usize).unwrap_or(false)
+    doc.schema
+        .with_types(|| rs_can_join::<Dyn>(&doc.inner, pos as usize))
+        .unwrap_or(false)
 }
 
 #[napi]
 pub fn join_point(doc: &Node_, pos: u32, dir: Option<i32>) -> Option<u32> {
-    rs_join_point::<Dyn>(&doc.inner, pos as usize, dir).map(|p| p as u32)
+    doc.schema
+        .with_types(|| rs_join_point::<Dyn>(&doc.inner, pos as usize, dir))
+        .map(|p| p as u32)
 }
 
 #[napi]

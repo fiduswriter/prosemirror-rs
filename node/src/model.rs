@@ -1057,3 +1057,17 @@ impl ContentMatch_ {
         self.inner.valid_end()
     }
 }
+
+#[napi]
+pub fn content_match_parse(expr: String, schema: &Schema) -> napi::Result<ContentMatch_> {
+    let inner = ParsedContentMatch::parse(&expr, &schema.inner).map_err(|e| {
+        napi::Error::new(
+            napi::Status::InvalidArg,
+            format!("Content expression parse error: {e}"),
+        )
+    })?;
+    Ok(ContentMatch_ {
+        schema: schema.inner.clone(),
+        inner,
+    })
+}
