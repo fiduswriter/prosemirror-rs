@@ -260,13 +260,13 @@ The test suite is structured as:
 cargo test --all
 ```
 
-**Library unit tests** (`cargo test --lib`) — 54 tests covering model internals,
+**Library unit tests** (`cargo test --lib`) — covers model internals,
 transform operations, content expression parsing, and dynamic schema loading.
 
 **Integration tests** (`tests/`) — Ported from the JS and Python test suites:
 
-- `tests/test_resolve.rs` — 9 tests from `prosemirror-model/test/test-resolve.ts`
-- `tests/test_mapping.rs` — 11 tests from `prosemirror-transform/test/test-mapping.ts`
+- `tests/test_resolve.rs` — from `prosemirror-model/test/test-resolve.ts`
+- `tests/test_mapping.rs` — from `prosemirror-transform/test/test-mapping.ts`
 - `tests/test_transform_wrap.rs` — Wrapper-stack validation and content-match tests
 
 ### Python upstream tests (against Rust shim)
@@ -283,8 +283,7 @@ PYTHONPATH=tests/shim pytest tests/upstream/ -v
 ```
 
 > **Note:** `test_dom.py` was removed because DOM serialization is out of scope for this project.
->
-> Current status: **456 passed, 0 failed**.
+
 
 ### Node.js upstream tests (against Rust shim)
 
@@ -300,40 +299,7 @@ npm run build:release
 node run-upstream-tests.mjs
 ```
 
-> **Note:** `test-dom.ts` is excluded because DOM serialization is out of scope.
-
-Current status (latest run):
-
-| File                    | Passing | Failing / Pending |
-| ----------------------- | ------- | ----------------- |
-| `test-content.cjs`      | 62      | 0                 |
-| `test-diff.cjs`         | 18      | 0                 |
-| `test-mapping.cjs`      | 10      | 0                 |
-| `test-mark.cjs`         | 40      | 0                 |
-| `test-node.cjs`         | 40      | 0                 |
-| `test-replace.cjs`      | 22      | 0                 |
-| `test-replace_step.cjs` | 1       | 3                 |
-| `test-resolve.cjs`      | 2       | 0                 |
-| `test-slice.cjs`        | 19      | 1                 |
-| `test-step.cjs`         | 19      | 0                 |
-| `test-structure.cjs`    | 36      | 2                 |
-| `test-trans.cjs`        | 94      | 74 (\*)           |
-
-**Total: 363 passing, 80 failing/pending.**
-
-(\*) `test-trans.cjs` has one additional test (`removeMark > can remove more than one mark of the same type from a block`) that causes a process crash (SIGSEGV / hashbrown capacity overflow) when run together with the full file. It is excluded from the count above.
-
-Key remaining blockers:
-
-1. `Transform.replace` core algorithm differences (`replace_step` / `Fitter`) — 2 failures in `test-structure.cjs`, ~60 in `test-trans.cjs`.
-2. `ReplaceStep` / `ReplaceAroundStep` content-fit checks differ from JS — 3 failures in `test-replace_step.cjs`.
-3. `Step.map` for `ReplaceAroundStep` returns incorrect results — 2 failures in `test-replace_step.cjs`.
-4. `Slice` `can include parents` behavior differs — 1 failure in `test-slice.cjs`.
-5. `Transform.removeMark` with `MarkType` argument causes a memory-safety crash in hashbrown (`IndexMap` clone overflow) when called from Node bindings with a document containing multiple marks of the same type.
-6. `removeMark` and `removeNodeMark` now accept both `Mark` and `MarkType` via unified `MarkOrType` core API.
-7. `Node.firstChild` / `Node.lastChild` exposed as getters in Node bindings.
-8. `Step.toJSON` / `Step.fromJSON` aliases added in transform shim.
-9. `Transform.setNodeAttribute`, `Transform.setDocAttribute`, and `Transform.changedRange` exposed in Node bindings.
+> **Note:** `test-dom.js` is excluded because DOM serialization is out of scope.
 
 ### Python-generated fixtures
 
