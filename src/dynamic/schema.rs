@@ -75,10 +75,10 @@ pub struct NodeSpec {
     #[serde(default)]
     pub defining: bool,
     /// Whether this node defines context for its content
-    #[serde(default)]
+    #[serde(default, alias = "definingAsContext")]
     pub defining_as_context: bool,
     /// Whether this node is defining for its content
-    #[serde(default)]
+    #[serde(default, alias = "definingForContent")]
     pub defining_for_content: bool,
     /// Whether this is isolating
     #[serde(default)]

@@ -59,6 +59,21 @@ function markTypeToSpec(mt) {
   return {};
 }
 
+// Iterate a spec map (plain object or makeOrderedMap) in definition order.
+// fn(key, val) is called for every real node/mark key, skipping method keys.
+function forEachSpecEntry(map, fn) {
+  if (!map) return;
+  // makeOrderedMap has a .get() method and a .forEach() that skips its own
+  // internal keys (get, update, append, …).
+  if (typeof map.get === "function" && typeof map.forEach === "function") {
+    map.forEach((key, val) => fn(key, val));
+  } else {
+    for (const [k, v] of Object.entries(map)) {
+      if (typeof v !== "function") fn(k, v);
+    }
+  }
+}
+
 function stripFunctions(obj) {
   if (typeof obj === "function") return undefined;
   if (obj === null || typeof obj !== "object") return obj;
@@ -148,24 +163,13 @@ function ShimSchema(spec) {
       if (val instanceof NodeType) {
         mergedNodes[key] = val;
       } else if (typeof val === "object" && val !== null && !Array.isArray(val)) {
-        // Plain object: find the existing spec and merge only true spec properties
-        let existingNodeSpec = {};
-        // Try to get the raw spec from the original schema
-        const rawSpec = (schemaHint && getRawSpec(schemaHint)) ||
-                        allSpecs.find(s => s.nodes && s.nodes[key]) || {};
-        if (rawSpec.nodes && rawSpec.nodes[key]) {
-          existingNodeSpec = rawSpec.nodes[key];
-        }
-        // Only copy spec-relevant properties from the override
-        // Exclude: schema, inner, name (napi internal), _rawSpec (stripped by stripFunctions),
-        // and functions (can't serialize to Rust)
-        const override = {};
-        for (const [k, v] of Object.entries(val)) {
-          if (k === "schema" || k === "inner" || k === "name" || k === "_rawSpec") continue;
-          if (typeof v === "function") continue;
-          override[k] = v;
-        }
-        mergedNodes[key] = Object.assign({}, existingNodeSpec, override);
+        // Use the plain spec dict as-is.  Do NOT merge with existingNodeSpec —
+        // if the caller wants to preserve old properties they must spread them
+        // explicitly (e.g. Object.assign({}, schema.spec.nodes.get(key), {...})).
+        // Merging would incorrectly add `defining: true` (from the original
+        // blockquote spec) when the new spec intentionally leaves it out.
+        // stripFunctions will still merge any _rawSpec contained in val.
+        mergedNodes[key] = val;
       } else {
         mergedNodes[key] = val;
       }
@@ -178,54 +182,90 @@ function ShimSchema(spec) {
   setRawSpec(schema, spec);
   allSpecs.push(spec);
 
-  // Cache nodes and marks with _rawSpec attached, and override schema.nodes /
-  // schema.marks to return the cached objects so that schema.nodes[key].schema
-  // returns the shim schema and schema.nodes[key]._rawSpec is available.
+  // Build cachedNodes and specNodes in *definition order* by iterating
+  // spec.nodes (which is ordered) rather than schema.nodes (which is a
+  // HashMap and returns keys in hash order).
+  //
+  // specNodes contains plain spec dicts (not NodeType instances) so that
+  //   schema.spec.nodes.get("doc")  →  { content: "block+", attrs: {…} }
+  // just like the Python binding does.  This means downstream code like
+  //   Object.assign({}, schema.spec.nodes.get("doc"), { content: "heading body" })
+  // picks up all spec properties correctly.
+  //
+  // Keeping the correct definition order also ensures that when this spec is
+  // forwarded to a new Schema(), the Rust DynamicSchema builds its "block"
+  // group with paragraph before heading, so fillBefore picks paragraph.
   const cachedNodes = {};
-  for (const key in schema.nodes) {
+  const specNodes = {};
+  forEachSpecEntry(spec.nodes, (key, val) => {
     const nt = schema.nodes[key];
-    nt._rawSpec = spec.nodes ? spec.nodes[key] : undefined;
+    if (!nt) return;
+    nt._rawSpec = val;
     Object.defineProperty(nt, "schema", {
-      get() {
-        return schema;
-      },
+      get() { return schema; },
       configurable: true,
       enumerable: false,
     });
     cachedNodes[key] = nt;
+    // stripFunctions already knows how to turn NodeType_ / MarkType_ / plain
+    // objects into a clean spec dict (it uses nodeTypeToSpec / markTypeToSpec).
+    specNodes[key] = stripFunctions(val) || {};
+  });
+  // Include any schema nodes that were not in spec.nodes (shouldn't normally
+  // happen, but be defensive).
+  for (const key in schema.nodes) {
+    if (cachedNodes[key]) continue;
+    const nt = schema.nodes[key];
+    nt._rawSpec = undefined;
+    Object.defineProperty(nt, "schema", {
+      get() { return schema; },
+      configurable: true,
+      enumerable: false,
+    });
+    cachedNodes[key] = nt;
+    specNodes[key] = {};
   }
   Object.defineProperty(schema, "nodes", {
-    get() {
-      return cachedNodes;
-    },
+    get() { return cachedNodes; },
     configurable: true,
     enumerable: true,
   });
 
   const cachedMarks = {};
-  for (const key in schema.marks) {
+  const specMarks = {};
+  forEachSpecEntry(spec.marks, (key, val) => {
     const mt = schema.marks[key];
-    mt._rawSpec = spec.marks ? spec.marks[key] : undefined;
+    if (!mt) return;
+    mt._rawSpec = val;
     Object.defineProperty(mt, "schema", {
-      get() {
-        return schema;
-      },
+      get() { return schema; },
       configurable: true,
       enumerable: false,
     });
     cachedMarks[key] = mt;
+    specMarks[key] = stripFunctions(val) || {};
+  });
+  for (const key in schema.marks) {
+    if (cachedMarks[key]) continue;
+    const mt = schema.marks[key];
+    mt._rawSpec = undefined;
+    Object.defineProperty(mt, "schema", {
+      get() { return schema; },
+      configurable: true,
+      enumerable: false,
+    });
+    cachedMarks[key] = mt;
+    specMarks[key] = {};
   }
   Object.defineProperty(schema, "marks", {
-    get() {
-      return cachedMarks;
-    },
+    get() { return cachedMarks; },
     configurable: true,
     enumerable: true,
   });
 
   schema.spec = {
-    nodes: makeOrderedMap(cachedNodes),
-    marks: makeOrderedMap(cachedMarks),
+    nodes: makeOrderedMap(specNodes),
+    marks: makeOrderedMap(specMarks),
   };
   return schema;
 }

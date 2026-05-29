@@ -355,10 +355,8 @@ impl<S: Schema> Transform<S> {
         let mut preferred_target = -(from_rp.depth as isize + 1);
         target_depths.insert(0, preferred_target);
 
-        // When a node has definingAsContext: false, include its depth as a
-        // positive target (so content can be placed at the parent level).
-        // This matches JS behavior where non-defining-as-context nodes are
-        // transparent for depth targeting.
+        // This loop picks a preferred target depth and adds negative depths
+        // for positions where $from is at the node start — matching JS exactly.
         let mut pos = from_rp.pos.saturating_sub(1);
         for d in (1..=from_rp.depth).rev() {
             let node_type = from_rp.node(d).r#type();
@@ -372,14 +370,6 @@ impl<S: Schema> Transform<S> {
                 preferred_target = d as isize;
             } else if from_rp.before(d) == Some(pos) {
                 target_depths.insert(1, -(d as isize));
-            } else if !node_type.is_defining_for_content() {
-                // Node is not defining content: just skip it (don't add to depths)
-            } else {
-                // Node has definingForContent: true but definingAsContext: false.
-                // Add positive depth so content can be placed at parent level.
-                if !target_depths.contains(&(d as isize)) {
-                    target_depths.push(d as isize);
-                }
             }
             pos = pos.saturating_sub(1);
         }
