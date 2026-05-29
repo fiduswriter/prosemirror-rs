@@ -849,15 +849,185 @@ impl<S: Schema> Transform<S> {
     /// Join nodes at the given position.
     pub fn join(&mut self, pos: usize, depth: Option<usize>) -> &mut Self {
         let depth = depth.unwrap_or(1);
+        let br_type = self.doc.find_linebreak_replacement_type();
+
+        // Determine linebreak conversion mode (same logic as JS)
+        let mut convert_newlines: Option<bool> = None;
+        if let Some(br) = br_type {
+            if let Ok(rp) = self.doc.resolve(pos - depth) {
+                let before_node = rp.node(rp.depth);
+                if before_node.r#type().inline_content() {
+                    let pre = before_node.r#type().whitespace().as_deref() == Some("pre");
+                    let support_linebreak = before_node
+                        .r#type()
+                        .content_match()
+                        .match_type(br)
+                        .is_some();
+                    if pre && !support_linebreak {
+                        convert_newlines = Some(false);
+                    } else if !pre && support_linebreak {
+                        convert_newlines = Some(true);
+                    }
+                }
+            }
+        }
+
+        let map_from = self.steps.len();
+
+        // non-pre -> pre: replace hard_breaks with newlines BEFORE join
+        if convert_newlines == Some(false) {
+            if let Some(br) = br_type {
+                let after_info = {
+                    if let Ok(rp) = self.doc.resolve(pos + depth) {
+                        // Find the block-level parent containing this position
+                        let block_depth = if rp.depth > 0 { 1 } else { 0 };
+                        let node = rp.node(block_depth).clone();
+                        let before_pos = rp.before(block_depth);
+                        before_pos.map(|p| (node, p))
+                    } else {
+                        None
+                    }
+                };
+                if let Some((after_node, after_pos)) = after_info {
+                    self.replace_linebreaks(&after_node, after_pos, map_from, br);
+                }
+            }
+        }
+
+        // clear_incompatible (only when no linebreak conversion)
+        if convert_newlines.is_none() {
+            if let Ok(rp) = self.doc.resolve(pos - depth) {
+                let before_node = rp.node(rp.depth);
+                if before_node.r#type().inline_content() {
+                    if let Ok(match_) =
+                        before_node.content_match_at(rp.index_after(rp.depth.max(1) - 1))
+                    {
+                        self.clear_incompatible(
+                            pos + depth - 1,
+                            before_node.r#type(),
+                            Some(match_),
+                            true,
+                        );
+                    }
+                }
+            }
+        }
+
+        let mapping = self.mapping.slice(map_from, None);
+        let start = mapping.map(pos - depth, 1);
         let _ = self.maybe_step(Step::Replace(ReplaceStep {
             span: crate::transform::Span {
-                from: pos - depth,
-                to: pos + depth,
+                from: start,
+                to: mapping.map(pos + depth, -1),
             },
             slice: Slice::default(),
             structure: true,
         }));
+
+        // pre -> non-pre: replace newlines with hard_breaks AFTER join
+        if convert_newlines == Some(true) {
+            if let Some(br) = br_type {
+                let joined_info = {
+                    if let Ok(rp) = self.doc.resolve(start) {
+                        // Get the block-level parent (depth 1) containing the joined content.
+                        // replace_newlines walks recursively, so starting from the doc is fine too.
+                        let block_depth = if rp.depth > 0 { 1 } else { 0 };
+                        let node = rp.node(block_depth).clone();
+                        rp.before(block_depth).map(|p| (node, p))
+                    } else {
+                        None
+                    }
+                };
+                if let Some((joined_node, joined_pos)) = joined_info {
+                    self.replace_newlines(&joined_node, joined_pos, self.steps.len(), br);
+                }
+            }
+        }
+
         self
+    }
+
+    /// Replace newlines (\\r\\n, \\r, \\n) in the text content of the
+    /// given node with the linebreak replacement node (e.g. hard_break).
+    /// Called AFTER a node's type has been changed from pre to non-pre.
+    fn replace_newlines(
+        &mut self,
+        node: &S::Node,
+        pos: usize,
+        map_from: usize,
+        br_type: S::NodeType,
+    ) {
+        let mapping = self.mapping.slice(map_from, None);
+        self.replace_newlines_impl(node, pos, &mapping, br_type);
+    }
+
+    fn replace_newlines_impl(
+        &mut self,
+        node: &S::Node,
+        pos: usize,
+        mapping: &Mapping,
+        br_type: S::NodeType,
+    ) {
+        if node.is_text() {
+            let text_str = node
+                .text_node()
+                .map(|t| t.text.as_str().to_string())
+                .unwrap_or_default();
+            for m in text_str.match_indices(['\n', '\r']) {
+                let start = mapping.map(pos + m.0, 1);
+                let br = br_type.create(serde_json::Value::Null, None, None);
+                self.replace_with(start, start + 1, crate::model::Fragment::from(vec![br]));
+            }
+        }
+        if let Some(content) = node.content() {
+            let mut offset = 0;
+            for i in 0..content.child_count() {
+                let child = content.child(i);
+                self.replace_newlines_impl(child, pos + 1 + offset, mapping, br_type);
+                offset += child.node_size();
+            }
+        }
+    }
+
+    /// Replace linebreak replacement nodes (e.g. hard_break) in the content of
+    /// the given node with newline text nodes.
+    /// Called BEFORE a node's type is changed from non-pre to pre.
+    fn replace_linebreaks(
+        &mut self,
+        node: &S::Node,
+        pos: usize,
+        map_from: usize,
+        br_type: S::NodeType,
+    ) {
+        let mapping = self.mapping.slice(map_from, None);
+        self.replace_linebreaks_impl(node, pos, &mapping, br_type);
+    }
+
+    fn replace_linebreaks_impl(
+        &mut self,
+        node: &S::Node,
+        pos: usize,
+        mapping: &Mapping,
+        br_type: S::NodeType,
+    ) {
+        if let Some(content) = node.content() {
+            let mut offset = 0;
+            for i in 0..content.child_count() {
+                let child = content.child(i);
+                if child.r#type() == br_type {
+                    let start = mapping.map(pos + 1 + offset, 1);
+                    let text_node = S::Node::text("\n");
+                    self.replace_with(
+                        start,
+                        start + 1,
+                        crate::model::Fragment::from(vec![text_node]),
+                    );
+                } else {
+                    self.replace_linebreaks_impl(child, pos + 1 + offset, mapping, br_type);
+                }
+                offset += child.node_size();
+            }
+        }
     }
 
     /// Remove content that is not valid in the given parent type.
@@ -951,6 +1121,7 @@ impl<S: Schema> Transform<S> {
         attrs: Option<serde_json::Value>,
     ) -> &mut Self {
         let map_from = self.steps.len();
+        let br_type = self.doc.find_linebreak_replacement_type();
         if let Some(content) = self.doc.content() {
             let mut positions = Vec::new();
             content.nodes_between(
@@ -958,19 +1129,41 @@ impl<S: Schema> Transform<S> {
                 to,
                 &mut |node, pos| {
                     if node.is_textblock() {
-                        positions.push((pos, node.node_size()));
+                        positions.push((pos, node.node_size(), node.clone()));
                         return false;
                     }
                     true
                 },
                 0,
             );
-            for (pos, size) in positions {
+            for (pos, size, node) in positions {
                 let mapped_pos = self.mapping.slice(map_from, None).map(pos, 1);
                 if !super::structure::can_change_type::<S>(&self.doc, mapped_pos, node_type) {
                     continue;
                 }
-                self.clear_incompatible(mapped_pos, node_type, None, true);
+                // Determine linebreak conversion mode
+                let mut convert_newlines: Option<bool> = None;
+                if let Some(br) = br_type {
+                    let pre = node_type.whitespace().as_deref() == Some("pre");
+                    let support_linebreak = node_type.content_match().match_type(br).is_some();
+                    if pre && !support_linebreak {
+                        convert_newlines = Some(false);
+                    } else if !pre && support_linebreak {
+                        convert_newlines = Some(true);
+                    }
+                }
+                // non-pre -> pre: replace hard_breaks with newlines BEFORE clear
+                if convert_newlines == Some(false) {
+                    if let Some(br) = br_type {
+                        self.replace_linebreaks(&node, pos, map_from, br);
+                    }
+                }
+                self.clear_incompatible(
+                    self.mapping.slice(map_from, None).map(pos, 1),
+                    node_type,
+                    None,
+                    convert_newlines.is_none(),
+                );
                 let mapping = self.mapping.slice(map_from, None);
                 let start_m = mapping.map(pos, 1);
                 let end_m = mapping.map(pos + size, 1);
@@ -988,6 +1181,32 @@ impl<S: Schema> Transform<S> {
                     insert: 1,
                     structure: true,
                 }));
+                // pre -> non-pre: replace newlines with hard_breaks AFTER step
+                if convert_newlines == Some(true) {
+                    if let Some(br) = br_type {
+                        // Find the newly created node and convert its newlines
+                        let step_len = self.steps.len();
+                        if let Some(doc_content) = self.doc.content() {
+                            let mut new_node_pos = None;
+                            let mut cur = start_m;
+                            for i in 0..doc_content.child_count() {
+                                let child = doc_content.child(i);
+                                let end = cur + child.node_size();
+                                if cur >= start_m
+                                    && cur < start_m + 1
+                                    && child.r#type() == node_type
+                                {
+                                    new_node_pos = Some((child.clone(), cur));
+                                    break;
+                                }
+                                cur = end;
+                            }
+                            if let Some((new_node, pos)) = new_node_pos {
+                                self.replace_newlines(&new_node, pos, step_len, br);
+                            }
+                        }
+                    }
+                }
             }
         }
         self

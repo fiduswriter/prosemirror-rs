@@ -4,16 +4,16 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde_json::Value;
 
-use crate::model::{Fragment_, MarkType_, Mark_, Node_, ResolvedPos_, Slice_};
+use crate::model::{MarkType_, Mark_, Node_, Slice_};
 use prosemirror::dynamic::types::{Dyn, DynamicNodeType};
 use prosemirror::dynamic::DynamicSchema;
-use prosemirror::model::{Fragment, MarkSet, Node, NodeType, ResolvedPos, Slice};
+use prosemirror::model::{Fragment, MarkSet, NodeType, Slice};
 use prosemirror::transform::{
     map::{MapResult, Mappable, Mapping, StepMap},
     structure::{
         can_join as rs_can_join, can_split as rs_can_split, drop_point as rs_drop_point,
         find_wrapping as rs_find_wrapping, insert_point as rs_insert_point,
-        join_point as rs_join_point, lift_target as rs_lift_target, NodeRange,
+        join_point as rs_join_point, lift_target as rs_lift_target,
     },
     AddMarkStep, AddNodeMarkStep, AttrStep, DocAttrStep, MarkOrType, RemoveMarkStep,
     RemoveNodeMarkStep, ReplaceAroundStep, ReplaceStep, Step, Transform,
@@ -728,7 +728,7 @@ pub fn lift_target(range: &crate::model::NodeRange_) -> Option<u32> {
 pub fn find_wrapping(
     range: &crate::model::NodeRange_,
     node_type: &crate::model::NodeType_,
-    attrs: Option<Value>,
+    _attrs: Option<Value>,
 ) -> Option<Vec<Value>> {
     let node_range = range.to_node_range()?;
     let schema = range.schema.clone();

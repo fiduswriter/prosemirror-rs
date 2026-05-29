@@ -141,11 +141,12 @@ for (const name of chainMethods) {
 // ---------------------------------------------------------------------------
 
 function getLbType(schema, rawSpec) {
-  // Try using NodeType.spec from the schema's nodes (works for shim schemas)
+  // Try using _rawSpec from the shim's NodeType objects
   if (schema && schema.nodes) {
     for (const name in schema.nodes) {
-      const spec = schema.nodes[name].spec;
-      if (spec && spec.linebreakReplacement) return schema.nodes[name];
+      const nt = schema.nodes[name];
+      const spec = nt._rawSpec || nt.spec;
+      if (spec && spec.linebreakReplacement) return nt;
     }
   }
   // Fall back: look in rawSpec (works for Rust NAPI schemas where .spec may be incomplete)
@@ -205,22 +206,8 @@ function contentBreaksToNewlines(fragment, schema, lbType) {
 // setBlockType: supports attrs as a plain object OR a function (node) => attrs
 const origSetBlockType = OrigTransform.prototype.setBlockType;
 ShimTransform.prototype.setBlockType = function (from, to, type, attrs) {
-  const targetIsCode = !!(type.spec && type.spec.code);
-  const lbType = getLbType(type.schema);
-
-  // Collect source nodes that need linebreak conversion
-  const lbConversions = [];
-  if (lbType) {
-    this.doc.nodesBetween(from, to != null ? to : from, (node, pos) => {
-      if (node.isTextblock) {
-        const sourceIsCode = !!(node.type.spec && node.type.spec.code);
-        if (sourceIsCode !== targetIsCode) {
-          lbConversions.push({ node, pos, sourceIsCode });
-        }
-      }
-    });
-  }
-
+  // Delegate all linebreak conversion to Rust core.
+  // The shim only handles function-style attrs.
   if (typeof attrs === "function") {
     const newFrom = this.mapping.map(from, -1);
     const newTo = to != null ? this.mapping.map(to, 1) : newFrom;
@@ -229,101 +216,20 @@ ShimTransform.prototype.setBlockType = function (from, to, type, attrs) {
       if (node.isTextblock) blocks.push({ node, pos });
     });
     for (let { node, pos } of blocks) {
-      const sourceIsCode = !!(node.type.spec && node.type.spec.code);
       const mappedPos = this.mapping.map(pos + 1, 1);
       const computedAttrs = attrs(node);
-      if (lbType && sourceIsCode !== targetIsCode) {
-        // Manual conversion: build new node with converted content
-        const mappedNodePos = this.mapping.map(pos, -1);
-        const newFrag = sourceIsCode && !targetIsCode
-          ? contentNewlinesToBreaks(node.content, type.schema, lbType)
-          : contentBreaksToNewlines(node.content, type.schema, lbType);
-        const newNode = type.create(computedAttrs, newFrag);
-          this.replace(mappedNodePos, mappedNodePos + node.nodeSize, new bindings.Slice(bindings.Fragment.from([newNode]), 0, 0));
-      } else {
-        origSetBlockType.call(this, mappedPos, mappedPos, type, computedAttrs);
-      }
+      origSetBlockType.call(this, mappedPos, mappedPos, type, computedAttrs);
     }
     return this;
   }
-
-  if (lbType && lbConversions.length > 0) {
-    // For blocks needing linebreak conversion, do manual replacement
-    // Work backwards to avoid position shifts
-    for (let i = lbConversions.length - 1; i >= 0; i--) {
-      const { node, pos, sourceIsCode } = lbConversions[i];
-      const mappedPos = this.mapping.map(pos, -1);
-      const nodeSize = node.nodeSize;
-      const nodeAttrs = typeof attrs === "object" ? attrs : null;
-      const newFrag = sourceIsCode && !targetIsCode
-        ? contentNewlinesToBreaks(node.content, type.schema, lbType)
-        : contentBreaksToNewlines(node.content, type.schema, lbType);
-      const newNode = type.create(nodeAttrs, newFrag);
-      this.replace(mappedPos, mappedPos + nodeSize, new bindings.Slice(bindings.Fragment.from([newNode]), 0, 0));
-    }
-    // Apply setBlockType for remaining nodes that don't need lb conversion
-    // (Simplified: if all nodes need conversion, skip the setBlockType call)
-    const hasNonLbNodes = (to != null ? to - from : 0) > 0; // rough check
-    if (lbConversions.length === 0) {
-      origSetBlockType.call(this, this.mapping.map(from, -1), to != null ? this.mapping.map(to, 1) : undefined, type, attrs);
-    }
-    return this;
-  }
-
   origSetBlockType.call(this, from, to, type, attrs);
   return this;
 };
 
-// join: apply linebreak conversion after joining code <-> non-code blocks
+// join: delegate linebreak conversion to Rust core
 const origJoin = OrigTransform.prototype.join;
 ShimTransform.prototype.join = function (pos, depth) {
-  // Record types of the two nodes being joined
-  const $pos = this.doc.resolve(pos);
-  const before = $pos.nodeBefore;
-  const after = $pos.nodeAfter;
-  const lbType = getLbType(this.doc.type.schema);
-
   origJoin.call(this, pos, depth);
-
-  if (lbType && before && after) {
-    const beforeIsCode = !!(before.type.spec && before.type.spec.code);
-    const afterIsCode = !!(after.type.spec && after.type.spec.code);
-    if (beforeIsCode !== afterIsCode) {
-      // The joined node takes the type of "before".
-      // Find the merged node in the new doc and convert content
-      const mappedPos = this.mapping.map(pos - 1, -1);
-      const $joined = this.doc.resolve(mappedPos);
-      const joinedStart = $joined.start($joined.depth);
-      const joinedEnd = $joined.end($joined.depth);
-
-      if (!beforeIsCode && afterIsCode) {
-        // Joined into a non-code block: convert \n -> br (work backwards)
-        const nlPositions = [];
-        this.doc.nodesBetween(joinedStart, joinedEnd, (n, p) => {
-          if (n.isText) {
-            const text = n.text;
-            for (let i = text.length - 1; i >= 0; i--) {
-              if (text[i] === "\n") nlPositions.push(p + i);
-            }
-          }
-        });
-        for (const nlPos of nlPositions) {
-          this.replaceWith(nlPos, nlPos + 1, lbType.create());
-        }
-      } else if (beforeIsCode && !afterIsCode) {
-        // Joined into a code block: convert br -> \n (work backwards)
-        const lbPositions = [];
-        this.doc.nodesBetween(joinedStart, joinedEnd, (n, p) => {
-          if (n.type.name === lbType.name) lbPositions.push(p);
-        });
-        const schema = $joined.parent.type.schema;
-        for (let i = lbPositions.length - 1; i >= 0; i--) {
-          const lbPos = lbPositions[i];
-          this.replaceWith(lbPos, lbPos + 1, schema.text("\n"));
-        }
-      }
-    }
-  }
   return this;
 };
 

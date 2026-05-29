@@ -15,6 +15,14 @@ pub trait Schema: Sized + 'static {
     type NodeType: NodeType<Self>;
     /// This type represents the `ContentMatch` impl
     type ContentMatch: ContentMatch<Self>;
+
+    /// Find the node type that acts as a linebreak replacement (if any).
+    /// This is the inline node type with `linebreak_replacement: true`
+    /// (typically `hard_break`), used when converting newlines in text
+    /// content to/from inline nodes.
+    fn find_linebreak_replacement_type(&self) -> Option<Self::NodeType> {
+        None
+    }
 }
 
 /// A simple block node

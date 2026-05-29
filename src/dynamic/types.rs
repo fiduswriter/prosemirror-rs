@@ -74,6 +74,8 @@ pub struct DynamicNodeTypeData {
     pub allowed_marks: Option<Vec<String>>,
     /// Whitespace handling mode for this node type (e.g. "pre")
     pub whitespace: Option<String>,
+    /// Whether this node type represents a line break replacement
+    pub linebreak_replacement: bool,
 }
 
 /// Runtime data for a dynamic mark type.
@@ -678,6 +680,17 @@ impl Schema for Dyn {
     type MarkType = DynamicMarkType;
     type NodeType = DynamicNodeType;
     type ContentMatch = DynamicContentMatch;
+
+    fn find_linebreak_replacement_type(&self) -> Option<DynamicNodeType> {
+        with_types(|store| {
+            store
+                .node_types
+                .iter()
+                .position(|nt| nt.linebreak_replacement)
+                .map(|idx| DynamicNodeType { idx })
+        })
+        .flatten()
+    }
 }
 
 pub(crate) fn with_types<R>(f: impl FnOnce(&DynTypeStore) -> R) -> Option<R> {
@@ -1269,6 +1282,17 @@ impl NodeType<Dyn> for DynamicNodeType {
         .flatten()
     }
 
+    fn linebreak_replacement(self) -> bool {
+        with_types(|store| {
+            store
+                .node_types
+                .get(self.idx)
+                .map(|node_type| node_type.linebreak_replacement)
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+    }
+
     fn check_attrs(self, attrs: &serde_json::Value) -> Result<(), String> {
         with_types(|store| {
             if let Some(nt) = store.node_types.get(self.idx) {
@@ -1407,6 +1431,10 @@ impl Node<Dyn> for DynamicNode {
 
     fn r#type(&self) -> DynamicNodeType {
         DynamicNodeType { idx: self.type_idx }
+    }
+
+    fn find_linebreak_replacement_type(&self) -> Option<DynamicNodeType> {
+        Dyn.find_linebreak_replacement_type()
     }
 
     fn is_block(&self) -> bool {

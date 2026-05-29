@@ -95,6 +95,9 @@ pub struct NodeSpec {
     /// Whitespace handling mode
     #[serde(default)]
     pub whitespace: Option<String>,
+    /// Whether this node type represents a hard line break in text content
+    #[serde(default, alias = "linebreakReplacement")]
+    pub linebreak_replacement: bool,
 }
 
 fn default_true() -> bool {
@@ -326,7 +329,14 @@ impl DynamicSchema {
                 attrs,
                 attr_validators,
                 allowed_marks,
-                whitespace: node_spec.whitespace.clone(),
+                whitespace: if node_spec.whitespace.is_some() {
+                    node_spec.whitespace.clone()
+                } else if node_spec.code {
+                    Some("pre".to_string())
+                } else {
+                    None
+                },
+                linebreak_replacement: node_spec.linebreak_replacement,
             });
         }
 

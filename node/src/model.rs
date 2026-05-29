@@ -18,6 +18,7 @@ use prosemirror::transform::structure::NodeRange;
 // Helpers
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 pub fn extract_fragment(val: &Value, schema: &DynamicSchema) -> napi::Result<Fragment<Dyn>> {
     if val.is_null() {
         return Ok(Fragment::new());
@@ -34,6 +35,7 @@ pub fn extract_fragment(val: &Value, schema: &DynamicSchema) -> napi::Result<Fra
     ))
 }
 
+#[allow(dead_code)]
 pub fn extract_markset(val: &Value, _schema: &DynamicSchema) -> napi::Result<MarkSet<Dyn>> {
     if val.is_null() || val.as_array().map(|a| a.is_empty()).unwrap_or(false) {
         return Ok(MarkSet::new());

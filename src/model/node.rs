@@ -87,6 +87,13 @@ pub trait NodeType<S: Schema>: Copy + Clone + Debug + PartialEq + Eq {
         None
     }
 
+    /// Whether this node type acts as a linebreak replacement (hard_break with
+    /// `linebreakReplacement: true`). When text content with newlines is placed
+    /// in a non-pre textblock, the newlines are converted to nodes of this type.
+    fn linebreak_replacement(self) -> bool {
+        false
+    }
+
     /// Create a node of this type, filling in missing required child nodes
     /// if necessary. Returns None if the content cannot be made valid.
     fn create_and_fill(
@@ -336,6 +343,12 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
 
     /// Get the type of the node
     fn r#type(&self) -> S::NodeType;
+
+    /// Find the linebreak replacement node type in this node's schema,
+    /// if any (typically `hard_break` with `linebreakReplacement: true`).
+    fn find_linebreak_replacement_type(&self) -> Option<S::NodeType> {
+        None
+    }
 
     /// Get this node's attributes as a JSON value.
     /// Text nodes and nodes without attrs return `serde_json::Value::Null`.

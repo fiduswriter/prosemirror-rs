@@ -127,7 +127,52 @@ function makeOrderedMap(obj) {
 
 const OrigSchema = Schema;
 function ShimSchema(spec) {
-  const stripped = stripFunctions(spec);
+  // Merge node spec overrides: when a plain object is passed for a node,
+  // merge it into the node's existing spec so properties like
+  // linebreakReplacement are preserved.
+  //
+  // The schema property on NodeType objects is a non-enumerable getter,
+  // so Object.assign({}, nt) doesn't copy it. We find the real schema by
+  // looking at any NodeType entry in spec.nodes (they all have the same schema).
+  let schemaHint = null;
+  if (spec.nodes) {
+    for (const val of Object.values(spec.nodes)) {
+      if (val && val.schema) { schemaHint = val.schema; break; }
+    }
+  }
+  const mergedNodes = {};
+  if (spec.nodes) {
+    for (const [key, val] of Object.entries(spec.nodes)) {
+      // Skip internal keys that makeOrderedMap adds
+      if (typeof val === "function") { mergedNodes[key] = val; continue; }
+      if (val instanceof NodeType) {
+        mergedNodes[key] = val;
+      } else if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+        // Plain object: find the existing spec and merge only true spec properties
+        let existingNodeSpec = {};
+        // Try to get the raw spec from the original schema
+        const rawSpec = (schemaHint && getRawSpec(schemaHint)) ||
+                        allSpecs.find(s => s.nodes && s.nodes[key]) || {};
+        if (rawSpec.nodes && rawSpec.nodes[key]) {
+          existingNodeSpec = rawSpec.nodes[key];
+        }
+        // Only copy spec-relevant properties from the override
+        // Exclude: schema, inner, name (napi internal), _rawSpec (stripped by stripFunctions),
+        // and functions (can't serialize to Rust)
+        const override = {};
+        for (const [k, v] of Object.entries(val)) {
+          if (k === "schema" || k === "inner" || k === "name" || k === "_rawSpec") continue;
+          if (typeof v === "function") continue;
+          override[k] = v;
+        }
+        mergedNodes[key] = Object.assign({}, existingNodeSpec, override);
+      } else {
+        mergedNodes[key] = val;
+      }
+    }
+  }
+  const mergedSpec = Object.assign({}, spec, { nodes: mergedNodes });
+  const stripped = stripFunctions(mergedSpec);
   const schema = new OrigSchema(stripped);
   schema._rawSpec = spec;
   setRawSpec(schema, spec);
