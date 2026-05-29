@@ -539,18 +539,12 @@ impl Transform_ {
     }
 
     #[napi]
-    pub fn lift(
-        &mut self,
-        from: &ResolvedPos_,
-        to: &ResolvedPos_,
-        target: u32,
-    ) -> napi::Result<()> {
-        let range = self.schema.with_types(|| {
-            NodeRange::resolve(&from.doc, from.pos, to.pos)
-                .map_err(|e| napi::Error::new(Status::InvalidArg, format!("{e}")))
-        })?;
+    pub fn lift(&mut self, range: &crate::model::NodeRange_, target: u32) -> napi::Result<()> {
+        let node_range = range
+            .to_node_range()
+            .ok_or_else(|| napi::Error::new(Status::InvalidArg, "Invalid range"))?;
         self.schema.with_types(|| {
-            self.inner.lift(&range, target as usize);
+            self.inner.lift(&node_range, target as usize);
         });
         Ok(())
     }
@@ -558,14 +552,12 @@ impl Transform_ {
     #[napi]
     pub fn wrap(
         &mut self,
-        from: &ResolvedPos_,
-        to: &ResolvedPos_,
+        range: &crate::model::NodeRange_,
         wrappers: Vec<Value>,
     ) -> napi::Result<()> {
-        let range = self.schema.with_types(|| {
-            NodeRange::resolve(&from.doc, from.pos, to.pos)
-                .map_err(|e| napi::Error::new(Status::InvalidArg, format!("{e}")))
-        })?;
+        let node_range = range
+            .to_node_range()
+            .ok_or_else(|| napi::Error::new(Status::InvalidArg, "Invalid range"))?;
         let wrappers: Vec<prosemirror::transform::Wrapper<Dyn>> = wrappers
             .into_iter()
             .map(|w| {
@@ -591,7 +583,7 @@ impl Transform_ {
             })
             .collect::<napi::Result<Vec<_>>>()?;
         self.schema.with_types(|| {
-            self.inner.wrap(&range, &wrappers);
+            self.inner.wrap(&node_range, &wrappers);
         });
         Ok(())
     }
@@ -722,32 +714,29 @@ impl Transform_ {
 // ---------------------------------------------------------------------------
 
 #[napi]
-pub fn lift_target(from: &ResolvedPos_, to: &ResolvedPos_) -> Option<u32> {
-    let node_range: NodeRange<'_, Dyn> = from
+pub fn lift_target(range: &crate::model::NodeRange_) -> Option<u32> {
+    let node_range = range.to_node_range()?;
+    range
         .schema
-        .with_types(|| NodeRange::resolve(&from.doc, from.pos, to.pos).ok())?;
-    from.schema
         .with_types(|| rs_lift_target(&node_range))
         .map(|t| t as u32)
 }
 
 #[napi]
 pub fn find_wrapping(
-    from: &ResolvedPos_,
-    to: &ResolvedPos_,
+    range: &crate::model::NodeRange_,
     node_type: &crate::model::NodeType_,
     attrs: Option<Value>,
 ) -> Option<Vec<Value>> {
-    let node_range: NodeRange<'_, Dyn> = from
-        .schema
-        .with_types(|| NodeRange::resolve(&from.doc, from.pos, to.pos).ok())?;
-    from.schema.with_types(|| {
+    let node_range = range.to_node_range()?;
+    let schema = range.schema.clone();
+    schema.with_types(|| {
         rs_find_wrapping(&node_range, node_type.inner, |_nt| true).map(|wrappers| {
             wrappers
                 .into_iter()
                 .map(|w| {
                     serde_json::json!({
-                        "type": from.schema.with_types(|| w.node_type.name().to_string()),
+                        "type": schema.with_types(|| w.node_type.name().to_string()),
                         "attrs": w.attrs,
                     })
                 })

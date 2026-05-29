@@ -80,7 +80,14 @@ impl<S: Schema> Slice<S> {
         pos: usize,
         fragment: Fragment<S>,
     ) -> Result<Option<Slice<S>>, InsertError> {
-        let content = insert_into(&self.content, pos + self.open_start, fragment, None)?;
+        let content = insert_into(
+            &self.content,
+            pos + self.open_start,
+            fragment,
+            self.open_start + 1,
+            self.open_end + 1,
+            None,
+        )?;
         Ok(content.map(|c| Slice::<S>::new(c, self.open_start, self.open_end)))
     }
 }
@@ -129,13 +136,18 @@ fn insert_into<S: Schema>(
     content: &Fragment<S>,
     dist: usize,
     insert: Fragment<S>,
+    open_start: usize,
+    open_end: usize,
     parent: Option<&S::Node>,
 ) -> Result<Option<Fragment<S>>, InsertError> {
     let Index { index, offset } = content.find_index(dist, false)?;
     let child = content.maybe_child(index);
     if offset == dist || matches!(child, Some(c) if c.is_text()) {
         if let Some(p) = parent {
-            if !p.can_replace(index, index, Some(&insert), ..)? {
+            if open_start == 0
+                && open_end == 0
+                && !p.can_replace(index, index, Some(&insert), ..)?
+            {
                 return Ok(None);
             }
         }
@@ -152,7 +164,17 @@ fn insert_into<S: Schema>(
             child.content().unwrap_or(Fragment::EMPTY_REF),
             dist - offset - 1,
             insert,
-            None,
+            if index == 0 {
+                open_start.saturating_sub(1)
+            } else {
+                0
+            },
+            if index == content.child_count().saturating_sub(1) {
+                open_end.saturating_sub(1)
+            } else {
+                0
+            },
+            Some(child),
         )?;
         if let Some(i) = inner {
             Ok(Some(

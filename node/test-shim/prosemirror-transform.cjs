@@ -81,14 +81,12 @@ ShimTransform.prototype.split = function (pos, depth, typesAfter) {
 };
 
 ShimTransform.prototype.wrap = function (range, wrappers) {
-  const [from, to] = unwrapRange(range);
-  origWrap.call(this, from, to, normalizeWrappers(wrappers));
+  origWrap.call(this, range, normalizeWrappers(wrappers));
   return this;
 };
 
 ShimTransform.prototype.lift = function (range, target) {
-  const [from, to] = unwrapRange(range);
-  origLift.call(this, from, to, target);
+  origLift.call(this, range, target);
   return this;
 };
 
@@ -166,13 +164,11 @@ function canSplit(doc, pos, depth, typesAfter) {
 }
 
 function liftTarget(range) {
-  const [from, to] = unwrapRange(range);
-  return bindings.liftTarget(from, to);
+  return bindings.liftTarget(range);
 }
 
 function findWrapping(range, nodeType, attrs) {
-  const [from, to] = unwrapRange(range);
-  return bindings.findWrapping(from, to, nodeType, attrs);
+  return bindings.findWrapping(range, nodeType, attrs);
 }
 
 // ---------------------------------------------------------------------------

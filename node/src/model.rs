@@ -12,6 +12,7 @@ use prosemirror::dynamic::DynamicSchema;
 use prosemirror::model::{
     ContentMatch, Fragment, Mark, MarkSet, Node, NodeType, ResolvedPos, Slice,
 };
+use prosemirror::transform::structure::NodeRange;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1061,11 +1062,21 @@ impl ResolvedPos_ {
 
 #[napi]
 pub struct NodeRange_ {
-    schema: Arc<DynamicSchema>,
+    pub(crate) schema: Arc<DynamicSchema>,
     doc: DynamicNode,
     from_pos: usize,
     to_pos: usize,
     depth: usize,
+}
+
+impl NodeRange_ {
+    pub(crate) fn to_node_range(&self) -> Option<NodeRange<'_, Dyn>> {
+        self.schema.with_types(|| {
+            let from_rp = ResolvedPos::<Dyn>::resolve(&self.doc, self.from_pos).ok()?;
+            let to_rp = ResolvedPos::<Dyn>::resolve(&self.doc, self.to_pos).ok()?;
+            Some(NodeRange::new(from_rp, to_rp, self.depth))
+        })
+    }
 }
 
 #[napi]
@@ -1128,6 +1139,26 @@ impl NodeRange_ {
                 schema: self.schema.clone(),
                 inner: self.doc.clone(),
             })
+    }
+
+    #[napi(getter, js_name = "startIndex")]
+    pub fn start_index(&self) -> u32 {
+        self.schema
+            .with_types(|| {
+                let from_rp = ResolvedPos::<Dyn>::resolve(&self.doc, self.from_pos).ok()?;
+                Some(from_rp.index(self.depth) as u32)
+            })
+            .unwrap_or(0)
+    }
+
+    #[napi(getter, js_name = "endIndex")]
+    pub fn end_index(&self) -> u32 {
+        self.schema
+            .with_types(|| {
+                let to_rp = ResolvedPos::<Dyn>::resolve(&self.doc, self.to_pos).ok()?;
+                Some(to_rp.index_after(self.depth) as u32)
+            })
+            .unwrap_or(0)
     }
 }
 

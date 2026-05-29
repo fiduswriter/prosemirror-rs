@@ -29,5 +29,8 @@
   "devDependencies": {
     "ist": "^1.1.7",
     "mocha": "^11.7.6"
+  },
+  "dependencies": {
+    "prosemirror-test-builder": "^1.1.1"
   }
 }

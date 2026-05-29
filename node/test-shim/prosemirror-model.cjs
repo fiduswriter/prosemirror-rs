@@ -547,9 +547,8 @@ Object.defineProperty(Node.prototype, "textContent", {
 
 Slice.prototype.toString = function () {
   return (
-    "<" +
     this.content.toString() +
-    ">(" +
+    "(" +
     this.openStart +
     "," +
     this.openEnd +

@@ -77,7 +77,7 @@ impl<S: Schema> Transform<S> {
                 self.add_step(step, new_doc);
                 None
             }
-            Err(e) => Some(format!("{:?}", e)),
+            Err(e) => Some(format!("{}", e)),
         }
     }
 

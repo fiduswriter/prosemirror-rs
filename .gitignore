@@ -11,3 +11,5 @@ __pycache__/
 *.so
 test_clone
 plans/
+*.tgz
+node/package/
