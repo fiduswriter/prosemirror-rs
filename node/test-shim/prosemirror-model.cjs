@@ -23,6 +23,21 @@ const {
 } = bindings;
 
 // ---------------------------------------------------------------------------
+// Global registry of all raw specs for fallback lookups
+// ---------------------------------------------------------------------------
+
+const allSpecs = [];
+
+function findSpecByNodeTypeName(name) {
+  for (const spec of allSpecs) {
+    if (spec.nodes && spec.nodes[name]) {
+      return spec;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Strip functions from schema specs before passing to Rust
 // ---------------------------------------------------------------------------
 
@@ -85,6 +100,11 @@ function makeOrderedMap(obj) {
     if (!copy[key]) copy[key] = value;
     return copy;
   };
+  map.addToEnd = function (key, value) {
+    const copy = makeOrderedMap(this);
+    copy[key] = value;
+    return copy;
+  };
   map.forEach = function (fn) {
     for (const k in this) {
       if (
@@ -92,6 +112,7 @@ function makeOrderedMap(obj) {
         k === "update" ||
         k === "append" ||
         k === "addBefore" ||
+        k === "addToEnd" ||
         k === "forEach"
       )
         continue;
@@ -107,10 +128,15 @@ function ShimSchema(spec) {
   const schema = new OrigSchema(stripped);
   schema._rawSpec = spec;
   setRawSpec(schema, spec);
-  const specNodes = makeOrderedMap({});
+  allSpecs.push(spec);
+
+  // Cache nodes and marks with _rawSpec attached, and override schema.nodes /
+  // schema.marks to return the cached objects so that schema.nodes[key].schema
+  // returns the shim schema and schema.nodes[key]._rawSpec is available.
+  const cachedNodes = {};
   for (const key in schema.nodes) {
     const nt = schema.nodes[key];
-    specNodes[key] = nt;
+    nt._rawSpec = spec.nodes ? spec.nodes[key] : undefined;
     Object.defineProperty(nt, "schema", {
       get() {
         return schema;
@@ -118,11 +144,20 @@ function ShimSchema(spec) {
       configurable: true,
       enumerable: false,
     });
+    cachedNodes[key] = nt;
   }
-  const specMarks = makeOrderedMap({});
+  Object.defineProperty(schema, "nodes", {
+    get() {
+      return cachedNodes;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  const cachedMarks = {};
   for (const key in schema.marks) {
     const mt = schema.marks[key];
-    specMarks[key] = mt;
+    mt._rawSpec = spec.marks ? spec.marks[key] : undefined;
     Object.defineProperty(mt, "schema", {
       get() {
         return schema;
@@ -130,10 +165,19 @@ function ShimSchema(spec) {
       configurable: true,
       enumerable: false,
     });
+    cachedMarks[key] = mt;
   }
+  Object.defineProperty(schema, "marks", {
+    get() {
+      return cachedMarks;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
   schema.spec = {
-    nodes: specNodes,
-    marks: specMarks,
+    nodes: makeOrderedMap(cachedNodes),
+    marks: makeOrderedMap(cachedMarks),
   };
   return schema;
 }
@@ -150,16 +194,37 @@ Node.prototype.toJSON = Node.prototype.toJson;
 const WrappedFragment = Object.create(Fragment);
 Object.setPrototypeOf(WrappedFragment, Fragment);
 Object.defineProperty(WrappedFragment, "from", {
-  value: function (nodes) {
-    if (nodes instanceof Node) nodes = [nodes];
-    return Fragment.from(nodes);
+  value: function (...args) {
+    let nodes;
+    if (args.length === 0 || args[0] == null) {
+      return Fragment.from([]);
+    }
+    if (args.length === 1) {
+      nodes = args[0];
+      if (nodes instanceof Fragment) return nodes;
+      if (nodes instanceof Node) nodes = [nodes];
+      if (!Array.isArray(nodes)) nodes = [nodes];
+    } else {
+      nodes = args;
+    }
+    const frag = Fragment.from(nodes);
+    if (nodes && nodes.length > 0 && nodes[0]._rawSpec) {
+      frag._rawSpec = nodes[0]._rawSpec;
+    }
+    return frag;
   },
   writable: true,
   configurable: true,
   enumerable: true,
 });
 Object.defineProperty(WrappedFragment, "fromArray", {
-  value: Fragment.fromArray.bind(Fragment),
+  value: function (nodes) {
+    const frag = Fragment.fromArray.call(Fragment, nodes);
+    if (nodes && nodes.length > 0 && nodes[0]._rawSpec) {
+      frag._rawSpec = nodes[0]._rawSpec;
+    }
+    return frag;
+  },
   writable: true,
   configurable: true,
   enumerable: true,
@@ -169,40 +234,308 @@ Object.defineProperty(WrappedFragment, "fromArray", {
 Slice.empty = new Slice(WrappedFragment.from([]), 0, 0);
 
 // ---------------------------------------------------------------------------
+// Schema.nodeFromJSON alias
+// ---------------------------------------------------------------------------
+
+Schema.prototype.nodeFromJSON = function (json) {
+  return this.nodeFromJson(json);
+};
+
+// ---------------------------------------------------------------------------
+// Child caching to preserve object identity across nodesBetween / nodeAt
+// ---------------------------------------------------------------------------
+
+const fragmentChildCache = new WeakMap();
+const origFragmentChild = Fragment.prototype.child;
+Fragment.prototype.child = function (index) {
+  if (!fragmentChildCache.has(this)) fragmentChildCache.set(this, new Map());
+  const cache = fragmentChildCache.get(this);
+  if (!cache.has(index)) {
+    const child = origFragmentChild.call(this, index);
+    if (child && this._rawSpec) child._rawSpec = this._rawSpec;
+    cache.set(index, child);
+  }
+  return cache.get(index);
+};
+
+// Cache Node.content so that Node.child() and Fragment.child() share the same
+// cache, preserving object identity between nodeAt() and nodesBetween().
+const nodeContentCache = new WeakMap();
+const origContentDesc = Object.getOwnPropertyDescriptor(
+  Node.prototype,
+  "content",
+);
+Object.defineProperty(Node.prototype, "content", {
+  get() {
+    if (!nodeContentCache.has(this)) {
+      nodeContentCache.set(this, origContentDesc.get.call(this));
+    }
+    return nodeContentCache.get(this);
+  },
+  configurable: true,
+  enumerable: true,
+});
+
+Node.prototype.child = function (index) {
+  return this.content.child(index);
+};
+
+Fragment.prototype.findIndex = function (pos) {
+  if (pos == 0) return { index: 0, offset: 0 };
+  for (let i = 0, acc = 0; i < this.childCount; i++) {
+    let child = this.child(i);
+    let end = acc + child.nodeSize;
+    if (end > pos) return { index: i, offset: acc };
+    acc = end;
+  }
+  return { index: this.childCount, offset: this.size };
+};
+
+Node.prototype.maybeChild = function (index) {
+  if (index < 0 || index >= this.childCount) return null;
+  return this.child(index);
+};
+
+Node.prototype.nodeAt = function (pos) {
+  for (let node = this; ; ) {
+    let { index, offset } = node.content.findIndex(pos);
+    node = node.maybeChild(index);
+    if (!node) return null;
+    if (offset == pos || node.isText) return node;
+    pos -= offset + 1;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Node.nodesBetween / Node.textBetween
+// ---------------------------------------------------------------------------
+
+Node.prototype.nodesBetween = function (from, to, f, startPos = 0) {
+  this.content.nodesBetween(from, to, f, startPos, this);
+};
+
+Node.prototype.textBetween = function (from, to, blockSeparator, leafText) {
+  let text = "",
+    first = true;
+  this.nodesBetween(
+    from,
+    to,
+    (node, pos) => {
+      let nodeText = node.isText
+        ? node.text.slice(Math.max(from, pos) - pos, to - pos)
+        : !node.isLeaf
+          ? ""
+          : leafText
+            ? typeof leafText === "function"
+              ? leafText(node)
+              : leafText
+            : getLeafText(node);
+      if (
+        node.isBlock &&
+        ((node.isLeaf && nodeText) || node.isTextblock) &&
+        blockSeparator
+      ) {
+        if (first) first = false;
+        else text += blockSeparator;
+      }
+      text += nodeText;
+    },
+    0,
+  );
+  return text;
+};
+
+// ---------------------------------------------------------------------------
+// Fragment.nodesBetween / Fragment.textBetween
+// ---------------------------------------------------------------------------
+
+Fragment.prototype.nodesBetween = function (
+  from,
+  to,
+  f,
+  nodeStart = 0,
+  parent,
+) {
+  for (let i = 0, pos = 0; pos < to; i++) {
+    let child = this.child(i);
+    if (!child) break;
+    let end = pos + child.nodeSize;
+    if (end > from) {
+      // Use parent.child(i) when available so that nodeAt() and the
+      // callback receive the same wrapper object.
+      let nodeToPass =
+        parent && typeof parent.child === "function" ? parent.child(i) : child;
+      let result = f(nodeToPass, nodeStart + pos, parent || null, i);
+      if (result !== false && child.content.size) {
+        let start = pos + 1;
+        child.nodesBetween(
+          Math.max(0, from - start),
+          Math.min(child.content.size, to - start),
+          f,
+          nodeStart + start,
+        );
+      }
+    }
+    pos = end;
+  }
+};
+
+Fragment.prototype.textBetween = function (from, to, blockSeparator, leafText) {
+  let text = "",
+    first = true;
+  this.nodesBetween(
+    from,
+    to,
+    (node, pos) => {
+      let nodeText = node.isText
+        ? node.text.slice(Math.max(from, pos) - pos, to - pos)
+        : !node.isLeaf
+          ? ""
+          : leafText
+            ? typeof leafText === "function"
+              ? leafText(node)
+              : leafText
+            : getLeafText(node);
+      if (
+        node.isBlock &&
+        ((node.isLeaf && nodeText) || node.isTextblock) &&
+        blockSeparator
+      ) {
+        if (first) first = false;
+        else text += blockSeparator;
+      }
+      text += nodeText;
+    },
+    0,
+  );
+  return text;
+};
+
+// ---------------------------------------------------------------------------
 // toDebugString / leafText support
 // ---------------------------------------------------------------------------
 
-const origToString = Node.prototype.toString;
-Node.prototype.toString = function () {
-  const spec = this.type.schema._rawSpec;
-  if (spec && spec.nodes) {
-    const nodeSpec = spec.nodes[this.type.name];
-    if (nodeSpec && typeof nodeSpec.toDebugString === "function") {
-      return nodeSpec.toDebugString(this);
+function attachRawSpec(node, spec) {
+  if (node && typeof node === "object") {
+    node._rawSpec = spec;
+  }
+  return node;
+}
+
+function normalizeContentArg(content) {
+  if (content == null) return content;
+  if (content instanceof Node) return [content];
+  if (content instanceof Fragment) return content;
+  if (Array.isArray(content)) return content;
+  return [content];
+}
+
+const origSchemaNode = Schema.prototype.node;
+Schema.prototype.node = function (typeName, attrs, content, marks) {
+  return attachRawSpec(
+    origSchemaNode.call(
+      this,
+      typeName,
+      attrs,
+      normalizeContentArg(content),
+      marks,
+    ),
+    this._rawSpec,
+  );
+};
+
+const origSchemaText = Schema.prototype.text;
+Schema.prototype.text = function (...args) {
+  return attachRawSpec(origSchemaText.apply(this, args), this._rawSpec);
+};
+
+const origNodeTypeCreate = NodeType.prototype.create;
+NodeType.prototype.create = function (attrs, content, marks) {
+  const node = origNodeTypeCreate.call(
+    this,
+    attrs,
+    normalizeContentArg(content),
+    marks,
+  );
+  const schema = this.schema;
+  if (schema && schema._rawSpec) attachRawSpec(node, schema._rawSpec);
+  return node;
+};
+
+const origNodeTypeCreateChecked = NodeType.prototype.createChecked;
+NodeType.prototype.createChecked = function (attrs, content, marks) {
+  const node = origNodeTypeCreateChecked.call(
+    this,
+    attrs,
+    normalizeContentArg(content),
+    marks,
+  );
+  const schema = this.schema;
+  if (schema && schema._rawSpec) attachRawSpec(node, schema._rawSpec);
+  return node;
+};
+
+const origNodeTypeCreateAndFill = NodeType.prototype.createAndFill;
+NodeType.prototype.createAndFill = function (attrs, content, marks) {
+  const result = origNodeTypeCreateAndFill.call(
+    this,
+    attrs,
+    normalizeContentArg(content),
+    marks,
+  );
+  if (result) {
+    const schema = this.schema;
+    if (schema && schema._rawSpec) attachRawSpec(result, schema._rawSpec);
+  }
+  return result;
+};
+
+function getLeafText(node) {
+  if (node._rawSpec && node._rawSpec.nodes) {
+    const nodeSpec = node._rawSpec.nodes[node.type.name];
+    if (nodeSpec && typeof nodeSpec.leafText === "function") {
+      return nodeSpec.leafText(node);
     }
   }
+  // Fallback for nodes that lost _rawSpec during binding-level cloning
+  const spec = findSpecByNodeTypeName(node.type.name);
+  if (spec && spec.nodes && spec.nodes[node.type.name]) {
+    const nodeSpec = spec.nodes[node.type.name];
+    if (nodeSpec && typeof nodeSpec.leafText === "function") {
+      return nodeSpec.leafText(node);
+    }
+  }
+  return "";
+}
+
+function getToDebugString(node) {
+  if (node._rawSpec && node._rawSpec.nodes) {
+    const nodeSpec = node._rawSpec.nodes[node.type.name];
+    if (nodeSpec && typeof nodeSpec.toDebugString === "function") {
+      return nodeSpec.toDebugString(node);
+    }
+  }
+  return null;
+}
+
+const origToString = Node.prototype.toString;
+Node.prototype.toString = function () {
+  const custom = getToDebugString(this);
+  if (custom !== null) return custom;
   return origToString.call(this);
 };
 
-const origTextContent = Object.getOwnPropertyDescriptor(
-  Node.prototype,
-  "textContent",
-);
 Object.defineProperty(Node.prototype, "textContent", {
   get() {
     if (this.isText) {
       const text = this.text;
       return text || "";
     }
-    const spec = this.type.schema._rawSpec;
-    if (spec && spec.nodes) {
-      const nodeSpec = spec.nodes[this.type.name];
-      if (nodeSpec && typeof nodeSpec.leafText === "function") {
-        return nodeSpec.leafText(this);
-      }
+    if (this.isLeaf) {
+      const leafText = getLeafText(this);
+      if (leafText) return leafText;
     }
-    if (this.isLeaf) return "";
-    return origTextContent.get.call(this);
+    return this.textBetween(0, this.content.size, "");
   },
   enumerable: true,
   configurable: true,
@@ -225,16 +558,21 @@ Slice.prototype.toString = function () {
 };
 
 // ---------------------------------------------------------------------------
-// Fragment.text_between shim
+// Fragment.toString shim
 // ---------------------------------------------------------------------------
 
-const origFragmentStr = Fragment.prototype.toString;
-Fragment.prototype.toString = function () {
+Fragment.prototype.toStringInner = function () {
   const inner = [];
   for (let i = 0; i < this.childCount; i++) {
-    inner.push(this.child(i).toString());
+    const child = this.child(i);
+    const custom = getToDebugString(child);
+    inner.push(custom !== null ? custom : child.toString());
   }
   return inner.join(", ");
+};
+
+Fragment.prototype.toString = function () {
+  return "<" + this.toStringInner() + ">";
 };
 
 // ---------------------------------------------------------------------------

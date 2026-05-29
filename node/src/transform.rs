@@ -385,6 +385,18 @@ impl Transform_ {
     }
 
     #[napi(getter)]
+    pub fn docs(&self) -> Vec<Node_> {
+        self.inner
+            .docs
+            .iter()
+            .map(|d| Node_ {
+                schema: self.schema.clone(),
+                inner: d.clone(),
+            })
+            .collect()
+    }
+
+    #[napi(getter)]
     pub fn mapping(&self) -> Mapping_ {
         Mapping_ {
             inner: self.inner.mapping.clone(),
@@ -463,9 +475,20 @@ impl Transform_ {
 
     #[napi]
     pub fn remove_mark(&mut self, from: u32, to: u32, mark: Option<&Mark_>) {
-        let mark = mark.map(|m| m.inner.clone());
+        let mark = mark.map(|m| MarkOrType::Mark(m.inner.clone()));
         self.schema.with_types(|| {
             self.inner.remove_mark(from as usize, to as usize, mark);
+        });
+    }
+
+    #[napi(js_name = "removeMarkType")]
+    pub fn remove_mark_type(&mut self, from: u32, to: u32, mark_type: &MarkType_) {
+        self.schema.with_types(|| {
+            self.inner.remove_mark(
+                from as usize,
+                to as usize,
+                Some(MarkOrType::MarkType(mark_type.inner)),
+            );
         });
     }
 
@@ -654,6 +677,43 @@ impl Transform_ {
             self.inner
                 .set_node_markup(pos as usize, type_.map(|t| t.inner), attrs, marks);
         });
+    }
+
+    #[napi]
+    pub fn set_node_attribute(&mut self, pos: u32, attr: String, value: Value) {
+        let step = Step::Attr(AttrStep {
+            pos: pos as usize,
+            attr,
+            value,
+        });
+        let _ = self.schema.with_types(|| self.inner.step(step));
+    }
+
+    #[napi]
+    pub fn set_doc_attribute(&mut self, attr: String, value: Value) {
+        let step = Step::DocAttr(DocAttrStep { attr, value });
+        let _ = self.schema.with_types(|| self.inner.step(step));
+    }
+
+    #[napi]
+    pub fn changed_range(&self) -> Option<Value> {
+        let mut from = usize::MAX;
+        let mut to = 0usize;
+        for (i, map) in self.inner.mapping.maps.iter().enumerate() {
+            if i > 0 {
+                from = map.map(from, 1);
+                to = map.map(to, -1);
+            }
+            map.for_each(|_f, _t, from_b, to_b| {
+                from = from.min(from_b);
+                to = to.max(to_b);
+            });
+        }
+        if from == usize::MAX {
+            None
+        } else {
+            Some(serde_json::json!({"from": from, "to": to }))
+        }
     }
 }
 

@@ -79,7 +79,11 @@ fn apply_operation(
             let mark = schema
                 .mark_from_json(&serde_json::json!({"type": mark_name}))
                 .unwrap();
-            tr.remove_mark(from, to, Some(mark));
+            tr.remove_mark(
+                from,
+                to,
+                Some(prosemirror::transform::MarkOrType::Mark(mark)),
+            );
         }
         "split" => {
             let pos = case["pos"].as_u64().unwrap() as usize;

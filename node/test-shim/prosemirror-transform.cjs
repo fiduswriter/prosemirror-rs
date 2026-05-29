@@ -1,5 +1,12 @@
 const bindings = require("../prosemirror-rs.linux-x64-gnu.node");
 
+// Upstream-compatible aliases
+const { Step, Transform } = bindings;
+Step.prototype.toJSON = Step.prototype.toJson;
+Step.fromJSON = Step.fromJson;
+Transform.prototype.toJSON = Transform.prototype.toJson;
+Transform.fromJSON = Transform.fromJson;
+
 function normalizeNodeType(t) {
   if (t instanceof bindings.NodeType) {
     return { type: t.name };
@@ -22,9 +29,43 @@ function normalizeWrappers(wrappers) {
 
 const OrigTransform = bindings.Transform;
 function ShimTransform(doc) {
-  return new OrigTransform(doc);
+  const tr = new OrigTransform(doc);
+  tr._originalDoc = doc;
+  return tr;
 }
 ShimTransform.prototype = OrigTransform.prototype;
+
+// Preserve the original doc's JS properties (like .tag from test-builder)
+const origDocsGetter = Object.getOwnPropertyDescriptor(
+  OrigTransform.prototype,
+  "docs",
+).get;
+Object.defineProperty(ShimTransform.prototype, "docs", {
+  get() {
+    const docs = origDocsGetter.call(this);
+    if (this._originalDoc && docs.length > 0) {
+      docs[0] = this._originalDoc;
+    }
+    return docs;
+  },
+});
+
+Object.defineProperty(ShimTransform.prototype, "before", {
+  get() {
+    const docs = this.docs;
+    if (docs.length > 0) return docs[0];
+    return this._originalDoc || this.doc;
+  },
+});
+
+// Save original native methods before overrides
+const origSplit = OrigTransform.prototype.split;
+const origWrap = OrigTransform.prototype.wrap;
+const origLift = OrigTransform.prototype.lift;
+const origRemoveMark = OrigTransform.prototype.removeMark;
+const origRemoveMarkType = OrigTransform.prototype.removeMarkType;
+const origRemoveNodeMark = OrigTransform.prototype.removeNodeMark;
+const origRemoveNodeMarkType = OrigTransform.prototype.removeNodeMarkType;
 
 function unwrapRange(range) {
   if (range && typeof range.from === "object" && typeof range.to === "object") {
@@ -35,38 +76,38 @@ function unwrapRange(range) {
 
 // Methods that need NodeType argument normalization
 ShimTransform.prototype.split = function (pos, depth, typesAfter) {
-  OrigTransform.prototype.split.call(
-    this,
-    pos,
-    depth,
-    normalizeTypes(typesAfter),
-  );
+  origSplit.call(this, pos, depth, normalizeTypes(typesAfter));
   return this;
 };
 
 ShimTransform.prototype.wrap = function (range, wrappers) {
   const [from, to] = unwrapRange(range);
-  OrigTransform.prototype.wrap.call(
-    this,
-    from,
-    to,
-    normalizeWrappers(wrappers),
-  );
+  origWrap.call(this, from, to, normalizeWrappers(wrappers));
   return this;
 };
 
 ShimTransform.prototype.lift = function (range, target) {
   const [from, to] = unwrapRange(range);
-  OrigTransform.prototype.lift.call(this, from, to, target);
+  origLift.call(this, from, to, target);
+  return this;
+};
+
+ShimTransform.prototype.removeMark = function (from, to, mark) {
+  // Upstream accepts Mark, MarkType, or null/undefined.
+  if (mark && mark.create) {
+    origRemoveMarkType.call(this, from, to, mark);
+  } else {
+    origRemoveMark.call(this, from, to, mark || undefined);
+  }
   return this;
 };
 
 ShimTransform.prototype.removeNodeMark = function (pos, mark) {
   // Upstream accepts either a Mark or a MarkType.
   if (mark && mark.create) {
-    OrigTransform.prototype.removeNodeMarkType.call(this, pos, mark);
+    origRemoveNodeMarkType.call(this, pos, mark);
   } else {
-    OrigTransform.prototype.removeNodeMark.call(this, pos, mark);
+    origRemoveNodeMark.call(this, pos, mark);
   }
   return this;
 };
@@ -74,15 +115,14 @@ ShimTransform.prototype.removeNodeMark = function (pos, mark) {
 // Methods that need to return `this` for chaining
 const chainMethods = [
   "replace",
-  "replaceWith",
   "delete",
   "addMark",
-  "removeMark",
   "addNodeMark",
-  "removeNodeMark",
   "join",
   "setBlockType",
   "setNodeMarkup",
+  "setNodeAttribute",
+  "setDocAttribute",
   "replaceRange",
   "replaceRangeWith",
   "deleteRange",
@@ -99,6 +139,27 @@ for (const name of chainMethods) {
     };
   }
 }
+
+const origReplace = OrigTransform.prototype.replace;
+
+ShimTransform.prototype.replaceWith = function (from, to, content) {
+  let fragment;
+  if (content instanceof bindings.Fragment) {
+    fragment = content;
+  } else if (Array.isArray(content)) {
+    fragment = bindings.Fragment.from(content);
+  } else if (content instanceof bindings.Node) {
+    fragment = bindings.Fragment.from([content]);
+  } else {
+    fragment = bindings.Fragment.from([content]);
+  }
+  origReplace.call(this, from, to, new bindings.Slice(fragment, 0, 0));
+  return this;
+};
+
+ShimTransform.prototype.insert = function (pos, content) {
+  return this.replaceWith(pos, pos, content);
+};
 
 function canSplit(doc, pos, depth, typesAfter) {
   return bindings.canSplit(doc, pos, depth, normalizeTypes(typesAfter));

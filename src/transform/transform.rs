@@ -170,7 +170,12 @@ impl<S: Schema> Transform<S> {
     }
 
     /// Remove mark(s) from the inline content in the given range.
-    pub fn remove_mark(&mut self, from: usize, to: usize, mark: Option<S::Mark>) -> &mut Self {
+    pub fn remove_mark(
+        &mut self,
+        from: usize,
+        to: usize,
+        mark: Option<MarkOrType<S>>,
+    ) -> &mut Self {
         let mut matched: Vec<(S::Mark, usize, usize, usize)> = Vec::new();
         let mut step = 0usize;
         self.doc.nodes_between(
@@ -184,12 +189,23 @@ impl<S: Schema> Transform<S> {
                 let node_marks = node.marks().cloned().unwrap_or_default();
                 let to_remove: Vec<S::Mark> = match &mark {
                     None => node_marks.iter().cloned().collect(),
-                    Some(mark) => {
+                    Some(MarkOrType::Mark(mark)) => {
                         if mark.is_in_set(&node_marks) {
                             vec![mark.clone()]
                         } else {
                             vec![]
                         }
+                    }
+                    Some(MarkOrType::MarkType(mark_type)) => {
+                        let mut remaining: Vec<S::Mark> = node_marks.iter().cloned().collect();
+                        let mut found = Vec::new();
+                        while let Some(idx) =
+                            remaining.iter().position(|m| m.r#type() == *mark_type)
+                        {
+                            let mark = remaining.remove(idx);
+                            found.push(mark);
+                        }
+                        found
                     }
                 };
                 if !to_remove.is_empty() {

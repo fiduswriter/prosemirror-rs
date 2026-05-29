@@ -570,14 +570,18 @@ impl PyTransform {
                 for mark in marks_to_remove {
                     let mut this = slf.borrow_mut();
                     schema.with_types(|| {
-                        this.inner.remove_mark(from, to, Some(mark.inner));
+                        this.inner
+                            .remove_mark(from, to, Some(MarkOrType::Mark(mark.inner)));
                     });
                 }
             } else if let Ok(mark) = mark_any.cast::<crate::model::PyMark>() {
                 let mut this = slf.borrow_mut();
                 schema.with_types(|| {
-                    this.inner
-                        .remove_mark(from, to, Some(mark.borrow().inner.clone()));
+                    this.inner.remove_mark(
+                        from,
+                        to,
+                        Some(MarkOrType::Mark(mark.borrow().inner.clone())),
+                    );
                 });
             } else {
                 return Err(PyValueError::new_err("mark must be a Mark or MarkType"));

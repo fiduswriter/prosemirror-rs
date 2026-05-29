@@ -102,11 +102,20 @@ function builders(schema, names) {
       let value = names[name];
       let typeName = value.nodeType || value.markType || name;
       let type = schema.nodes[typeName];
+      let attrs = value.attrs;
+      if (attrs === undefined) {
+        attrs = {};
+        for (let key in value) {
+          if (key !== "nodeType" && key !== "markType") {
+            attrs[key] = value[key];
+          }
+        }
+      }
       if (type) {
-        result[name] = block(type, value.attrs || {});
+        result[name] = block(type, attrs);
       } else {
         type = schema.marks[typeName];
-        if (type) result[name] = mark(type, value.attrs || {});
+        if (type) result[name] = mark(type, attrs);
       }
     }
   }

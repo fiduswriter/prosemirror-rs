@@ -282,6 +282,38 @@ impl NodeType_ {
     }
 
     #[napi]
+    pub fn create_and_fill(
+        &self,
+        attrs: Option<Value>,
+        content: Option<Either<&Fragment_, Vec<&Node_>>>,
+        marks: Option<Vec<&Mark_>>,
+    ) -> napi::Result<Option<Node_>> {
+        let attrs = attrs.unwrap_or(Value::Null);
+        let content = self.schema.with_types(|| match content {
+            Some(Either::A(frag)) => Some(frag.inner.clone()),
+            Some(Either::B(nodes)) => Some(Fragment::from(
+                nodes
+                    .into_iter()
+                    .map(|n| n.inner.clone())
+                    .collect::<Vec<_>>(),
+            )),
+            None => None,
+        });
+        let marks = match marks {
+            Some(marks) => MarkSet::from_vec(marks.into_iter().map(|m| m.inner.clone()).collect()),
+            None => MarkSet::new(),
+        };
+        let node = self.schema.with_types(|| {
+            self.inner
+                .create_and_fill(attrs, content.as_ref(), Some(&marks))
+        });
+        Ok(node.map(|n| Node_ {
+            schema: self.schema.clone(),
+            inner: n,
+        }))
+    }
+
+    #[napi]
     pub fn valid_content(&self, fragment: &Fragment_) -> bool {
         self.schema
             .with_types(|| self.inner.valid_content(&fragment.inner))
@@ -433,7 +465,7 @@ impl Fragment_ {
             .map(|n| n.schema.clone())
             .unwrap_or_else(|| Arc::new(DynamicSchema::default()));
         let frag = schema.with_types(|| {
-            Fragment::from(
+            Fragment::from_array(
                 nodes
                     .into_iter()
                     .map(|n| n.inner.clone())
@@ -446,7 +478,7 @@ impl Fragment_ {
         }
     }
 
-    #[napi]
+    #[napi(factory)]
     pub fn from_(nodes: Option<Vec<&Node_>>) -> Fragment_ {
         match nodes {
             None => Fragment_ {
@@ -459,7 +491,7 @@ impl Fragment_ {
                     .map(|n| n.schema.clone())
                     .unwrap_or_else(|| Arc::new(DynamicSchema::default()));
                 let frag = schema.with_types(|| {
-                    Fragment::from(
+                    Fragment::from_array(
                         nodes
                             .into_iter()
                             .map(|n| n.inner.clone())
@@ -724,6 +756,11 @@ impl Node_ {
         self.schema.with_types(|| self.inner.is_leaf())
     }
 
+    #[napi(getter)]
+    pub fn is_textblock(&self) -> bool {
+        self.schema.with_types(|| self.inner.is_textblock())
+    }
+
     #[napi]
     pub fn child(&self, index: u32) -> Option<Node_> {
         match self.inner.child(index as usize) {
@@ -735,7 +772,7 @@ impl Node_ {
         }
     }
 
-    #[napi]
+    #[napi(getter)]
     pub fn first_child(&self) -> Option<Node_> {
         <DynamicNode as Node<Dyn>>::first_child(&self.inner).map(|n| Node_ {
             schema: self.schema.clone(),
@@ -743,7 +780,7 @@ impl Node_ {
         })
     }
 
-    #[napi]
+    #[napi(getter)]
     pub fn last_child(&self) -> Option<Node_> {
         <DynamicNode as Node<Dyn>>::last_child(&self.inner).map(|n| Node_ {
             schema: self.schema.clone(),
