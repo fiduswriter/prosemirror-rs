@@ -355,6 +355,10 @@ impl<S: Schema> Transform<S> {
         let mut preferred_target = -(from_rp.depth as isize + 1);
         target_depths.insert(0, preferred_target);
 
+        // When a node has definingAsContext: false, include its depth as a
+        // positive target (so content can be placed at the parent level).
+        // This matches JS behavior where non-defining-as-context nodes are
+        // transparent for depth targeting.
         let mut pos = from_rp.pos.saturating_sub(1);
         for d in (1..=from_rp.depth).rev() {
             let node_type = from_rp.node(d).r#type();
@@ -368,6 +372,14 @@ impl<S: Schema> Transform<S> {
                 preferred_target = d as isize;
             } else if from_rp.before(d) == Some(pos) {
                 target_depths.insert(1, -(d as isize));
+            } else if !node_type.is_defining_for_content() {
+                // Node is not defining content: just skip it (don't add to depths)
+            } else {
+                // Node has definingForContent: true but definingAsContext: false.
+                // Add positive depth so content can be placed at parent level.
+                if !target_depths.contains(&(d as isize)) {
+                    target_depths.push(d as isize);
+                }
             }
             pos = pos.saturating_sub(1);
         }
@@ -423,7 +435,16 @@ impl<S: Schema> Transform<S> {
                 let marks_ok = parent
                     .r#type()
                     .allow_marks(insert.marks().unwrap_or(&MarkSet::new()));
-                if parent.can_replace_with(index, index, insert.r#type()) && marks_ok {
+                // Check if the node type can be inserted at this index in the parent.
+                // This uses the parent's actual content match at the given index,
+                // not the NodeType's generic can_replace_with (which doesn't have
+                // access to the actual content).
+                let can_insert = parent
+                    .content_match_at(index)
+                    .ok()
+                    .and_then(|m| m.match_type(insert.r#type()))
+                    .is_some_and(|m| m.valid_end());
+                if can_insert && marks_ok {
                     let from_pos = from_rp.before(target_depth).unwrap_or(from);
                     let to_pos = if expand {
                         to_rp.after(target_depth).unwrap_or(to)

@@ -121,9 +121,26 @@ impl<'a, S: Schema> ResolvedPos<'a, S> {
         }
     }
 
+    /// The (absolute) position at the start of the node's content at the given
+    /// level. Equivalent to JS `ResolvedPos.start(depth)`, i.e. `path[depth].before + 1`.
+    /// This is valid for `depth <= self.depth`.
+    pub fn content_start(&self, depth: usize) -> usize {
+        self.path[depth].before + 1
+    }
+
     /// The (absolute) position at the end of the node at the given level.
     pub fn end(&self, depth: usize) -> usize {
         self.start(depth) + self.node(depth).content().map(Fragment::size).unwrap_or(0)
+    }
+
+    /// The (absolute) position at the end of the node's content at the given
+    /// level. Equivalent to JS `ResolvedPos.end(depth)`.
+    pub fn content_end(&self, depth: usize) -> usize {
+        let mut end = self.content_start(depth);
+        if let Some(content) = self.node(depth).content() {
+            end += content.size();
+        }
+        end
     }
 
     /// The (absolute) position directly before the wrapping node at the given level, or, when
