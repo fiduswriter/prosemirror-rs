@@ -624,12 +624,14 @@ impl Transform_ {
             })
             .transpose()?;
         self.schema.with_types(|| {
-            self.inner.split(
-                pos as usize,
-                Some(depth as usize),
-                types.as_ref().map(|v| v.as_slice()),
-            );
-        });
+            self.inner
+                .split(
+                    pos as usize,
+                    Some(depth as usize),
+                    types.as_ref().map(|v| v.as_slice()),
+                )
+                .map_err(|e| napi::Error::new(Status::InvalidArg, format!("{e:?}")))
+        })?;
         Ok(())
     }
 

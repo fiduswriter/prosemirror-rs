@@ -66,9 +66,12 @@ function stripFunctions(obj) {
   if (obj instanceof MarkType) return markTypeToSpec(obj);
   if (obj instanceof Schema) return obj;
   if (Array.isArray(obj)) return obj.map(stripFunctions);
+  // Merge _rawSpec (original spec) into the object so Rust sees the full spec
+  const merged = obj._rawSpec ? Object.assign({}, obj._rawSpec, obj) : obj;
   const result = {};
-  for (const key in obj) {
-    const val = stripFunctions(obj[key]);
+  for (const key in merged) {
+    if (key === "_rawSpec") continue;
+    const val = stripFunctions(merged[key]);
     if (val !== undefined) result[key] = val;
   }
   return result;
@@ -448,6 +451,25 @@ const origSchemaText = Schema.prototype.text;
 Schema.prototype.text = function (...args) {
   return attachRawSpec(origSchemaText.apply(this, args), this._rawSpec);
 };
+
+// NodeType.spec: return the original JS spec from the schema registry
+Object.defineProperty(NodeType.prototype, "spec", {
+  get() {
+    // Try nodeTypeToSpec (works when .schema is set on this NodeType)
+    const fromSchema = nodeTypeToSpec(this);
+    if (fromSchema && Object.keys(fromSchema).length > 0) return fromSchema;
+    // Fall back: look up by node type name in global allSpecs registry
+    const name = this.name;
+    for (const spec of allSpecs) {
+      if (spec.nodes && spec.nodes[name]) {
+        const nodeSpec = spec.nodes[name];
+        return stripFunctions(nodeSpec) || {};
+      }
+    }
+    return this._rawSpec || {};
+  },
+  configurable: true,
+});
 
 const origNodeTypeCreate = NodeType.prototype.create;
 NodeType.prototype.create = function (attrs, content, marks) {

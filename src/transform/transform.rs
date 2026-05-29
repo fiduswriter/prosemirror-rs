@@ -492,6 +492,8 @@ impl<S: Schema> Transform<S> {
     /// Delete a range, expanding to cover full nodes when possible.
     pub fn delete_range(&mut self, from: usize, to: usize) -> &mut Self {
         let doc = self.doc.clone();
+        let mut from = from;
+        let mut to = to;
         let mut from_rp = match doc.resolve(from) {
             Ok(rp) => rp,
             Err(_) => return self,
@@ -522,8 +524,6 @@ impl<S: Schema> Transform<S> {
                 }
             }
             if !isolated {
-                let mut from = from;
-                let mut to = to;
                 for d in (1..=from_rp.depth).rev() {
                     if from == from_rp.start(d) {
                         if let Some(before) = from_rp.before(d) {

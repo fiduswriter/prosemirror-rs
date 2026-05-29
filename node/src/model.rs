@@ -249,7 +249,7 @@ impl NodeType_ {
         let attrs = attrs.unwrap_or(Value::Null);
         let content = self.schema.with_types(|| match content {
             Some(Either::A(frag)) => frag.inner.clone(),
-            Some(Either::B(nodes)) => Fragment::from(
+            Some(Either::B(nodes)) => Fragment::from_array(
                 nodes
                     .into_iter()
                     .map(|n| n.inner.clone())
