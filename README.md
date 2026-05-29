@@ -283,6 +283,8 @@ PYTHONPATH=tests/shim pytest tests/upstream/ -v
 ```
 
 > **Note:** `test_dom.py` was removed because DOM serialization is out of scope for this project.
+>
+> Current status: **456 passed, 0 failed**.
 
 ### Node.js upstream tests (against Rust shim)
 
