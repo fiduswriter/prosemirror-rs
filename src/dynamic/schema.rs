@@ -898,6 +898,268 @@ mod test_check_attrs {
     }
 }
 
+/// Tests for the bug introduced in 0.3.8 where `allows_mark_type`,
+/// `allow_marks`, and `valid_content` compared a mark's *name* against the
+/// raw entries in `allowed_marks`, which stores the spec-level strings (mark
+/// type names **or** mark group names).  A mark belonging to an allowed group
+/// was therefore incorrectly rejected, causing any collaborative step that
+/// carried a group-referenced mark (e.g. FidusWriter's `insertion` mark from
+/// the `track` group) to fail with `InvalidContent`.
+#[cfg(test)]
+mod test_mark_group_resolution {
+    use super::*;
+    use crate::editor::Editor;
+    use crate::model::{Fragment, NodeType};
+
+    /// Schema that mirrors the FidusWriter pattern:
+    /// - marks belong to named groups ("track", "annotation")
+    /// - nodes reference those groups in their `marks` spec (not individual names)
+    fn fw_like_schema() -> DynamicSchema {
+        DynamicSchema::from_json(&serde_json::json!({
+            "nodes": {
+                "doc":       { "content": "title body+" },
+                "title":     { "content": "text*", "marks": "annotation track" },
+                "body":      { "content": "inline*", "group": "block", "marks": "annotation track" },
+                "text":      { "group": "inline" }
+            },
+            "marks": {
+                // two marks in the "track" group
+                "insertion":  { "group": "track" },
+                "deletion":   { "group": "track" },
+                // one mark in the "annotation" group
+                "comment":    { "group": "annotation" },
+                // mark with no group — must NOT be allowed by the nodes above
+                "unrelated":  {}
+            }
+        }))
+        .unwrap()
+    }
+
+    // -----------------------------------------------------------------------
+    // allows_mark_type
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn allows_mark_type_accepts_marks_referenced_by_group() {
+        let schema = fw_like_schema();
+        schema.with_types(|| {
+            let title = schema.node_type("title").unwrap();
+            let insertion = schema.mark_type("insertion").unwrap();
+            let deletion = schema.mark_type("deletion").unwrap();
+            let comment = schema.mark_type("comment").unwrap();
+
+            // All three belong to groups listed in `marks: "annotation track"`.
+            assert!(
+                title.allows_mark_type(insertion),
+                "title should allow the `insertion` mark (via 'track' group)"
+            );
+            assert!(
+                title.allows_mark_type(deletion),
+                "title should allow the `deletion` mark (via 'track' group)"
+            );
+            assert!(
+                title.allows_mark_type(comment),
+                "title should allow the `comment` mark (via 'annotation' group)"
+            );
+        });
+    }
+
+    #[test]
+    fn allows_mark_type_rejects_marks_not_in_any_allowed_group() {
+        let schema = fw_like_schema();
+        schema.with_types(|| {
+            let title = schema.node_type("title").unwrap();
+            let unrelated = schema.mark_type("unrelated").unwrap();
+
+            assert!(
+                !title.allows_mark_type(unrelated),
+                "title must NOT allow a mark that is in no allowed group"
+            );
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // valid_content
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn valid_content_accepts_text_with_group_mark() {
+        let schema = fw_like_schema();
+        schema.with_types(|| {
+            let title_type = schema.node_type("title").unwrap();
+
+            // Build a text node carrying the `insertion` mark.
+            let insertion_mark = schema
+                .mark_from_json(&serde_json::json!({
+                    "type": "insertion"
+                }))
+                .unwrap();
+            let text_with_mark = schema
+                .node_from_json(&serde_json::json!({
+                    "type": "text",
+                    "text": "T",
+                    "marks": [{"type": "insertion"}]
+                }))
+                .unwrap();
+            let _ = insertion_mark; // used above via node_from_json
+
+            let fragment = Fragment::from(vec![text_with_mark]);
+
+            assert!(
+                title_type.valid_content(&fragment),
+                "valid_content must accept text carrying a mark whose group is in allowed_marks"
+            );
+        });
+    }
+
+    #[test]
+    fn valid_content_rejects_text_with_disallowed_mark() {
+        let schema = fw_like_schema();
+        schema.with_types(|| {
+            let title_type = schema.node_type("title").unwrap();
+
+            let text_with_unrelated = schema
+                .node_from_json(&serde_json::json!({
+                    "type": "text",
+                    "text": "T",
+                    "marks": [{"type": "unrelated"}]
+                }))
+                .unwrap();
+
+            let fragment = Fragment::from(vec![text_with_unrelated]);
+
+            assert!(
+                !title_type.valid_content(&fragment),
+                "valid_content must reject text carrying a mark whose group is NOT in allowed_marks"
+            );
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Editor::apply_steps_json — the exact failure path from the bug report
+    // -----------------------------------------------------------------------
+
+    /// Regression test: inserting text with a `track`-group mark into a node
+    /// whose `marks` spec lists the group name (not the individual mark name)
+    /// must succeed.
+    ///
+    /// Before the fix, this returned `Ok(false)` (step rejected with
+    /// `InvalidContent`) because `valid_content` compared the mark name
+    /// "insertion" against `["annotation", "track"]` and found no match.
+    #[test]
+    fn editor_apply_replace_with_group_mark_succeeds() {
+        let schema_json = serde_json::to_string(&serde_json::json!({
+            "nodes": {
+                "doc":   { "content": "title body+" },
+                "title": { "content": "text*", "marks": "annotation track" },
+                "body":  { "content": "inline*", "group": "block", "marks": "annotation track" },
+                "text":  { "group": "inline" }
+            },
+            "marks": {
+                "insertion": { "group": "track" },
+                "deletion":  { "group": "track" },
+                "comment":   { "group": "annotation" }
+            }
+        }))
+        .unwrap();
+
+        // Minimal document: doc > title (empty) + body (empty paragraph-equivalent)
+        let doc_json = serde_json::to_string(&serde_json::json!({
+            "type": "doc",
+            "content": [
+                { "type": "title" },
+                { "type": "body" }
+            ]
+        }))
+        .unwrap();
+
+        let mut editor = Editor::new(&schema_json, &doc_json).unwrap();
+
+        // Step: insert "T" with an `insertion` mark at position 1
+        // (inside the empty title node, mirroring the exact FidusWriter failure).
+        let step = serde_json::json!([{
+            "stepType": "replace",
+            "from": 1,
+            "to": 1,
+            "slice": {
+                "content": [{
+                    "type": "text",
+                    "text": "T",
+                    "marks": [{"type": "insertion"}]
+                }]
+            }
+        }]);
+
+        let result = editor
+            .apply_steps_json(&serde_json::to_string(&step).unwrap())
+            .expect("apply_steps_json must not error");
+
+        assert!(
+            result,
+            "ReplaceStep inserting text with a mark referenced via a group name \
+             must succeed (was broken between v0.3.7 and v0.3.11)"
+        );
+        assert_eq!(editor.version(), 1);
+
+        // Verify the mark is actually in the resulting document.
+        let doc_out: serde_json::Value =
+            serde_json::from_str(&editor.doc_json(false).unwrap()).unwrap();
+        let title_content = &doc_out["content"][0]["content"][0];
+        assert_eq!(title_content["text"], "T");
+        assert_eq!(title_content["marks"][0]["type"], "insertion");
+    }
+
+    /// Inserting text with a mark that is *not* in any allowed group must be
+    /// rejected (ensures the fix did not accidentally loosen the constraint
+    /// for genuinely disallowed marks).
+    #[test]
+    fn editor_apply_replace_with_disallowed_mark_fails() {
+        let schema_json = serde_json::to_string(&serde_json::json!({
+            "nodes": {
+                "doc":   { "content": "title" },
+                "title": { "content": "text*", "marks": "track" },
+                "text":  { "group": "inline" }
+            },
+            "marks": {
+                "insertion":  { "group": "track" },
+                "unrelated":  {}
+            }
+        }))
+        .unwrap();
+
+        let doc_json = serde_json::to_string(&serde_json::json!({
+            "type": "doc",
+            "content": [{ "type": "title" }]
+        }))
+        .unwrap();
+
+        let mut editor = Editor::new(&schema_json, &doc_json).unwrap();
+
+        let step = serde_json::json!([{
+            "stepType": "replace",
+            "from": 1,
+            "to": 1,
+            "slice": {
+                "content": [{
+                    "type": "text",
+                    "text": "X",
+                    "marks": [{"type": "unrelated"}]
+                }]
+            }
+        }]);
+
+        let result = editor
+            .apply_steps_json(&serde_json::to_string(&step).unwrap())
+            .expect("apply_steps_json must not error");
+
+        assert!(
+            !result,
+            "ReplaceStep inserting text with a mark not in any allowed group must be rejected"
+        );
+        assert_eq!(editor.version(), 0, "version must not advance on failure");
+    }
+}
+
 #[cfg(test)]
 mod test_node_check_validate {
     use super::*;
