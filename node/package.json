@@ -1,6 +1,6 @@
 {
   "name": "prosemirror-rs",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Node.js bindings for prosemirror-rs: a Rust implementation of ProseMirror's document model and transform pipeline",
   "main": "index.js",
   "types": "index.d.ts",

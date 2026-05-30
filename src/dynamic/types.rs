@@ -1146,7 +1146,14 @@ impl NodeType<Dyn> for DynamicNodeType {
                 }
                 if let Some(allowed) = &nt.allowed_marks {
                     for mark in child.marks().unwrap_or(&MarkSet::new()).iter() {
-                        if !allowed.contains(&store.mark_types[mark.r#type().idx].name) {
+                        let mark_data = &store.mark_types[mark.r#type().idx];
+                        // allowed_marks stores raw spec entries which may be mark type
+                        // names *or* mark group names (e.g. "annotation", "track").
+                        // A mark is allowed if its own name OR any of its groups appears
+                        // in the allowed list — matching upstream ProseMirror behaviour.
+                        let ok = allowed.contains(&mark_data.name)
+                            || mark_data.groups.iter().any(|g| allowed.contains(g));
+                        if !ok {
                             return false;
                         }
                     }
@@ -1161,7 +1168,11 @@ impl NodeType<Dyn> for DynamicNodeType {
         with_types(|store| {
             let nt = &store.node_types[self.idx];
             match &nt.allowed_marks {
-                Some(allowed) => allowed.contains(&store.mark_types[mark_type.idx].name),
+                Some(allowed) => {
+                    let mark_data = &store.mark_types[mark_type.idx];
+                    allowed.contains(&mark_data.name)
+                        || mark_data.groups.iter().any(|g| allowed.contains(g))
+                }
                 None => true,
             }
         })
@@ -1185,7 +1196,10 @@ impl NodeType<Dyn> for DynamicNodeType {
             match &nt.allowed_marks {
                 Some(allowed) => {
                     for mark in marks {
-                        if !allowed.contains(&store.mark_types[mark.r#type().idx].name) {
+                        let mark_data = &store.mark_types[mark.r#type().idx];
+                        let ok = allowed.contains(&mark_data.name)
+                            || mark_data.groups.iter().any(|g| allowed.contains(g));
+                        if !ok {
                             return false;
                         }
                     }
