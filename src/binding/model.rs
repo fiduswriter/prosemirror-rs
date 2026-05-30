@@ -84,13 +84,16 @@ impl BNodeType {
     // converter from `DynamicContentMatch` -> `ParsedContentMatch` (or to
     // change `BContentMatch`'s inner representation) before re-enabling.
     //
-    // pub fn content_match(&self) -> BContentMatch {
-    //     let inner = self.schema.with_types(|| self.inner.content_match());
-    //     BContentMatch {
-    //         schema: self.schema.clone(),
-    //         inner,
-    //     }
-    // }
+    pub fn content_match(&self) -> Option<BContentMatch> {
+        let inner = self.schema.with_types(|| {
+            let dcm = self.inner.content_match();
+            ParsedContentMatch::from_dynamic(dcm, self.schema.clone())
+        })?;
+        Some(BContentMatch {
+            schema: self.schema.clone(),
+            inner,
+        })
+    }
 
     pub fn has_required_attrs(&self) -> bool {
         self.schema.with_types(|| self.inner.has_required_attrs())
@@ -674,15 +677,17 @@ impl BNode {
     // TODO(docs/PLAN.md): blocked on the same `DynamicContentMatch` <->
     // `ParsedContentMatch` conversion as `BNodeType::content_match()`.
     //
-    // pub fn content_match_at(&self, index: usize) -> Result<BContentMatch, String> {
-    //     let inner = self.schema.with_types(|| {
-    //         Node::content_match_at(&self.inner, index).map_err(|e| format!("{e}"))
-    //     })?;
-    //     Ok(BContentMatch {
-    //         schema: self.schema.clone(),
-    //         inner,
-    //     })
-    // }
+    pub fn content_match_at(&self, index: usize) -> Result<BContentMatch, String> {
+        let inner = self.schema.with_types(|| {
+            let dcm = Node::content_match_at(&self.inner, index).map_err(|e| format!("{e}"))?;
+            ParsedContentMatch::from_dynamic(dcm, self.schema.clone())
+                .ok_or_else(|| "content_match_at: failed to convert match".to_string())
+        })?;
+        Ok(BContentMatch {
+            schema: self.schema.clone(),
+            inner,
+        })
+    }
 
     pub fn slice(&self, from: usize, to: usize, include_parents: bool) -> BSlice {
         let inner = self.schema.with_types(|| {
@@ -1164,50 +1169,55 @@ impl BContentMatch {
     // BContentMatch's inner type to `DynamicContentMatch`).  These methods
     // are part of the public ProseMirror docs and must be exposed eventually.
     //
-    // pub fn default_type(&self) -> Option<BNodeType> {
-    //     self.schema.with_types(|| {
-    //         self.inner.edge(0).map(|(nt, _)| BNodeType {
-    //             schema: self.schema.clone(),
-    //             inner: nt,
-    //             name: nt.name().to_owned(),
-    //         })
-    //     })
-    // }
-    //
-    // pub fn find_wrapping(&self, target: &BNodeType) -> Option<Vec<BNodeType>> {
-    //     self.schema.with_types(|| {
-    //         self.inner.find_wrapping(target.inner).map(|types| {
-    //             types
-    //                 .into_iter()
-    //                 .map(|nt| BNodeType {
-    //                     schema: self.schema.clone(),
-    //                     inner: nt,
-    //                     name: nt.name().to_owned(),
-    //                 })
-    //                 .collect()
-    //         })
-    //     })
-    // }
-    //
-    // pub fn edge_count(&self) -> usize {
-    //     self.schema.with_types(|| self.inner.edge_count())
-    // }
-    //
-    // pub fn edge(&self, n: usize) -> Option<(BNodeType, BContentMatch)> {
-    //     self.schema.with_types(|| {
-    //         self.inner.edge(n).map(|(nt, next)| {
-    //             (
-    //                 BNodeType {
-    //                     schema: self.schema.clone(),
-    //                     inner: nt,
-    //                     name: nt.name().to_owned(),
-    //                 },
-    //                 BContentMatch {
-    //                     schema: self.schema.clone(),
-    //                     inner: next,
-    //                 },
-    //             )
-    //         })
-    //     })
-    // }
+    pub fn default_type(&self) -> Option<BNodeType> {
+        let nt = self.inner.default_type()?;
+        let name = self.schema.node_types.get(nt.idx)?.name.clone();
+        Some(BNodeType {
+            schema: self.schema.clone(),
+            inner: nt,
+            name,
+        })
+    }
+
+    pub fn find_wrapping(&self, target: &BNodeType) -> Option<Vec<BNodeType>> {
+        let types = self.inner.find_wrapping(target.inner)?;
+        Some(
+            types
+                .into_iter()
+                .map(|nt| {
+                    let name = self
+                        .schema
+                        .node_types
+                        .get(nt.idx)
+                        .map(|d| d.name.clone())
+                        .unwrap_or_default();
+                    BNodeType {
+                        schema: self.schema.clone(),
+                        inner: nt,
+                        name,
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    pub fn edge_count(&self) -> usize {
+        self.inner.edge_count()
+    }
+
+    pub fn edge(&self, n: usize) -> Option<(BNodeType, BContentMatch)> {
+        let (nt, next) = self.inner.edge(n)?;
+        let name = self.schema.node_types.get(nt.idx)?.name.clone();
+        Some((
+            BNodeType {
+                schema: self.schema.clone(),
+                inner: nt,
+                name,
+            },
+            BContentMatch {
+                schema: self.schema.clone(),
+                inner: next,
+            },
+        ))
+    }
 }

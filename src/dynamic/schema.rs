@@ -157,8 +157,7 @@ pub struct DynamicSchema {
     /// The name of the top node type
     pub top_node: String,
     /// Stored content expressions (kept alive for pointer stability)
-    #[allow(dead_code)]
-    content_exprs: Vec<ContentExpr>,
+    pub(crate) content_exprs: Vec<ContentExpr>,
     /// The type store for thread-local access
     store: Box<DynTypeStore>,
 }
