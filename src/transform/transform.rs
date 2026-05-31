@@ -120,7 +120,7 @@ impl<S: Schema> Transform<S> {
             content.nodes_between(
                 from,
                 to,
-                &mut |node, pos| {
+                &mut |node, pos, _parent, _index| {
                     if !node.is_inline() {
                         return true;
                     }
@@ -157,6 +157,7 @@ impl<S: Schema> Transform<S> {
                     true
                 },
                 0,
+                None,
             );
         }
 
@@ -181,7 +182,7 @@ impl<S: Schema> Transform<S> {
         self.doc.nodes_between(
             from,
             to,
-            &mut |node, pos| {
+            &mut |node, pos, _parent, _index| {
                 if !node.is_inline() {
                     return true;
                 }
@@ -1042,7 +1043,7 @@ impl<S: Schema> Transform<S> {
     }
 
     /// Remove content that is not valid in the given parent type.
-    fn clear_incompatible(
+    pub fn clear_incompatible(
         &mut self,
         pos: usize,
         parent_type: S::NodeType,
@@ -1138,7 +1139,7 @@ impl<S: Schema> Transform<S> {
             content.nodes_between(
                 from,
                 to,
-                &mut |node, pos| {
+                &mut |node, pos, _parent, _index| {
                     if node.is_textblock() {
                         positions.push((pos, node.node_size(), node.clone()));
                         return false;
@@ -1146,6 +1147,7 @@ impl<S: Schema> Transform<S> {
                     true
                 },
                 0,
+                None,
             );
             for (pos, size, node) in positions {
                 let mapped_pos = self.mapping.slice(map_from, None).map(pos, 1);

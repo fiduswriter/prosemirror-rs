@@ -52,37 +52,6 @@ def _node_type_create_checked(self, attrs=None, content=None, marks=None):
 NodeType.create_checked = _node_type_create_checked
 
 
-def _fragment_nodes_between(self, from_, to, f, node_start=0):
-    """Upstream-compatible Fragment.nodes_between."""
-    pos = 0
-    i = 0
-    while i < self.child_count and pos < to:
-        child = self.child(i)
-        end = pos + child.node_size
-        if end > from_:
-            if f(child, node_start + pos, self, i) and child.child_count > 0:
-                child.content.nodes_between(
-                    max(0, from_ - pos - 1),
-                    min(child.content.size, to - pos - 1),
-                    f,
-                    node_start + pos + 1,
-                )
-        pos = end
-        i += 1
-
-
-Fragment.nodes_between = _fragment_nodes_between
-
-
-def _node_nodes_between(self, from_, to, f, node_start=0):
-    """Upstream-compatible Node.nodes_between."""
-    if not self.is_text and self.content.size > 0:
-        self.content.nodes_between(from_, to, f, node_start)
-
-
-Node.nodes_between = _node_nodes_between
-
-
 # Save the original Rust methods we may delegate to
 _original_text_between = Node.text_between
 _original_node_str = Node.__str__

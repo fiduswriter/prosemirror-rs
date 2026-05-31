@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::model::{
     json_to_py, py_to_json, PyMark, PyMarkType, PyNode, PyNodeRange, PyNodeType, PySchema,
 };
+use prosemirror::binding::model::BNode;
 use prosemirror::dynamic::types::{Dyn, DynamicNode, DynamicNodeType};
 use prosemirror::dynamic::DynamicSchema;
 use prosemirror::model::{Mark, MarkSet, Node};
@@ -62,6 +63,20 @@ impl PyStepMap {
         PyStepMap {
             inner: self.inner.invert(),
         }
+    }
+
+    /// Call `f(old_start, old_end, new_start, new_end)` for each range in this map.
+    fn for_each(&self, py: Python<'_>, f: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut entries: Vec<(usize, usize, usize, usize)> = Vec::new();
+        self.inner
+            .for_each(|old_start, old_end, new_start, new_end| {
+                entries.push((old_start, old_end, new_start, new_end));
+            });
+        for (old_start, old_end, new_start, new_end) in entries {
+            f.call1((old_start, old_end, new_start, new_end))?;
+        }
+        let _ = py;
+        Ok(())
     }
 
     fn __richcmp__(&self, other: &Bound<'_, PyAny>, op: pyo3::basic::CompareOp) -> PyResult<bool> {
@@ -181,6 +196,20 @@ impl PyMapping {
         }
     }
 
+    fn copy(&self) -> PyMapping {
+        PyMapping {
+            inner: self.inner.clone(),
+        }
+    }
+
+    fn append_mapping(&mut self, mapping: &PyMapping) {
+        self.inner.append_mapping(&mapping.inner);
+    }
+
+    fn append_mapping_inverted(&mut self, mapping: &PyMapping) {
+        self.inner.append_mapping_inverted(&mapping.inner);
+    }
+
     #[getter]
     fn maps(&self) -> Vec<PyStepMap> {
         self.inner
@@ -206,8 +235,10 @@ impl PyStepResult {
     #[getter]
     fn doc(&self) -> Option<PyNode> {
         self.doc.as_ref().map(|n| PyNode {
-            schema: n.schema.clone(),
-            inner: n.inner.clone(),
+            inner: BNode {
+                schema: n.inner.schema.clone(),
+                inner: n.inner.inner.clone(),
+            },
         })
     }
 
@@ -227,8 +258,10 @@ fn wrap_step_result(
     match result {
         Ok(doc) => Ok(PyStepResult {
             doc: Some(PyNode {
-                schema: schema.clone(),
-                inner: doc,
+                inner: BNode {
+                    schema: schema.clone(),
+                    inner: doc,
+                },
             }),
             failed: None,
         }),
@@ -267,8 +300,11 @@ impl PyStep {
     }
 
     fn apply(&self, doc: &PyNode) -> PyResult<PyStepResult> {
-        let result = doc.schema.with_types(|| self.inner.apply(&doc.inner));
-        wrap_step_result(doc.schema.clone(), result)
+        let result = doc
+            .inner
+            .schema
+            .with_types(|| self.inner.apply(&doc.inner.inner));
+        wrap_step_result(doc.inner.schema.clone(), result)
     }
 
     fn get_map(&self) -> PyStepMap {
@@ -278,7 +314,10 @@ impl PyStep {
     }
 
     fn invert(&self, doc: &PyNode) -> PyResult<PyStep> {
-        let step = doc.schema.with_types(|| self.inner.invert(&doc.inner));
+        let step = doc
+            .inner
+            .schema
+            .with_types(|| self.inner.invert(&doc.inner.inner));
         Ok(PyStep { inner: step })
     }
 
@@ -299,7 +338,7 @@ impl PyStep {
         slice: Option<&crate::model::PySlice>,
         structure: Option<bool>,
     ) -> PyResult<PyStep> {
-        let slice = slice.map(|s| s.inner.clone()).unwrap_or_default();
+        let slice = slice.map(|s| s.inner.inner.clone()).unwrap_or_default();
         Ok(PyStep {
             inner: Step::Replace(ReplaceStep {
                 span: prosemirror::transform::Span { from, to },
@@ -314,7 +353,7 @@ impl PyStep {
         Ok(PyStep {
             inner: Step::AddMark(AddMarkStep {
                 span: prosemirror::transform::Span { from, to },
-                mark: mark.inner.clone(),
+                mark: mark.inner.inner.clone(),
             }),
         })
     }
@@ -324,7 +363,7 @@ impl PyStep {
         Ok(PyStep {
             inner: Step::RemoveMark(RemoveMarkStep {
                 span: prosemirror::transform::Span { from, to },
-                mark: mark.inner.clone(),
+                mark: mark.inner.inner.clone(),
             }),
         })
     }
@@ -347,8 +386,8 @@ impl PyTransform {
     fn new(doc: &Bound<'_, PyNode>) -> PyResult<Self> {
         let node = doc.borrow();
         Ok(PyTransform {
-            schema: node.schema.clone(),
-            inner: Transform::new(node.inner.clone()),
+            schema: node.inner.schema.clone(),
+            inner: Transform::new(node.inner.inner.clone()),
             before: doc.clone().unbind(),
         })
     }
@@ -356,8 +395,10 @@ impl PyTransform {
     #[getter]
     fn doc(&self) -> PyResult<PyNode> {
         Ok(PyNode {
-            schema: self.schema.clone(),
-            inner: self.inner.doc.clone(),
+            inner: BNode {
+                schema: self.schema.clone(),
+                inner: self.inner.doc.clone(),
+            },
         })
     }
 
@@ -383,8 +424,10 @@ impl PyTransform {
             .docs
             .iter()
             .map(|d| PyNode {
-                schema: self.schema.clone(),
-                inner: d.clone(),
+                inner: BNode {
+                    schema: self.schema.clone(),
+                    inner: d.clone(),
+                },
             })
             .collect())
     }
@@ -398,6 +441,31 @@ impl PyTransform {
 
     fn doc_changed(&self) -> bool {
         self.inner.doc_changed()
+    }
+
+    /// Return a deep copy of this mapping (mirrors `Mapping.copy` in the JS API).
+    fn copy_mapping(&self) -> PyMapping {
+        PyMapping {
+            inner: self.inner.mapping.clone(),
+        }
+    }
+
+    /// Remove content incompatible with `node_type` at `pos`.
+    fn clear_incompatible(
+        slf: &Bound<'_, Self>,
+        pos: usize,
+        node_type: &crate::model::PyNodeType,
+        clear_newlines: bool,
+    ) -> Py<Self> {
+        {
+            let mut this = slf.borrow_mut();
+            let schema = this.schema.clone();
+            let nt = node_type.inner.inner;
+            schema.with_types(|| {
+                this.inner.clear_incompatible(pos, nt, None, clear_newlines);
+            });
+        }
+        slf.clone().unbind()
     }
 
     fn step(slf: &Bound<'_, Self>, step: &PyStep) -> PyResult<Py<Self>> {
@@ -418,7 +486,7 @@ impl PyTransform {
         to: Option<usize>,
         slice: Option<&crate::model::PySlice>,
     ) -> PyResult<Py<Self>> {
-        let slice = slice.map(|s| s.inner.clone());
+        let slice = slice.map(|s| s.inner.inner.clone());
         {
             let mut this = slf.borrow_mut();
             let schema = this.schema.clone();
@@ -467,7 +535,8 @@ impl PyTransform {
             let mut this = slf.borrow_mut();
             let schema = this.schema.clone();
             schema.with_types(|| {
-                this.inner.replace_range(from, to, slice.inner.clone());
+                this.inner
+                    .replace_range(from, to, slice.inner.inner.clone());
             });
         }
         Ok(slf.clone().unbind())
@@ -483,7 +552,8 @@ impl PyTransform {
             let mut this = slf.borrow_mut();
             let schema = this.schema.clone();
             schema.with_types(|| {
-                this.inner.replace_range_with(from, to, node.inner.clone());
+                this.inner
+                    .replace_range_with(from, to, node.inner.inner.clone());
             });
         }
         Ok(slf.clone().unbind())
@@ -522,7 +592,7 @@ impl PyTransform {
             let mut this = slf.borrow_mut();
             let schema = this.schema.clone();
             schema.with_types(|| {
-                this.inner.add_mark(from, to, mark.inner.clone());
+                this.inner.add_mark(from, to, mark.inner.inner.clone());
             });
         }
         Ok(slf.clone().unbind())
@@ -537,7 +607,7 @@ impl PyTransform {
         let schema = slf.borrow().schema.clone();
         if let Some(mark_any) = mark {
             if let Ok(mark_type) = mark_any.cast::<crate::model::PyMarkType>() {
-                let target_idx = mark_type.borrow().inner.idx;
+                let target_idx = mark_type.borrow().inner.inner.idx;
                 let marks_to_remove: Vec<crate::model::PyMark> = {
                     let this = slf.borrow();
                     schema.with_types(|| {
@@ -546,15 +616,17 @@ impl PyTransform {
                         this.inner.doc.nodes_between(
                             from,
                             to,
-                            &mut |node, _pos| {
+                            &mut |node, _pos, _parent, _index| {
                                 if let Some(node_marks) = node.marks() {
                                     for m in node_marks.iter() {
                                         if m.r#type().idx == target_idx {
                                             let py_mark = crate::model::PyMark {
-                                                schema: this.schema.clone(),
-                                                inner: m.clone(),
+                                                inner: prosemirror::binding::model::BMark {
+                                                    schema: this.schema.clone(),
+                                                    inner: m.clone(),
+                                                },
                                             };
-                                            if seen.insert(py_mark.inner.clone()) {
+                                            if seen.insert(py_mark.inner.inner.clone()) {
                                                 result.push(py_mark);
                                             }
                                         }
@@ -571,7 +643,7 @@ impl PyTransform {
                     let mut this = slf.borrow_mut();
                     schema.with_types(|| {
                         this.inner
-                            .remove_mark(from, to, Some(MarkOrType::Mark(mark.inner)));
+                            .remove_mark(from, to, Some(MarkOrType::Mark(mark.inner.inner)));
                     });
                 }
             } else if let Ok(mark) = mark_any.cast::<crate::model::PyMark>() {
@@ -580,7 +652,7 @@ impl PyTransform {
                     this.inner.remove_mark(
                         from,
                         to,
-                        Some(MarkOrType::Mark(mark.borrow().inner.clone())),
+                        Some(MarkOrType::Mark(mark.borrow().inner.inner.clone())),
                     );
                 });
             } else {
@@ -600,7 +672,7 @@ impl PyTransform {
             let mut this = slf.borrow_mut();
             let schema = this.schema.clone();
             schema.with_types(|| {
-                this.inner.add_node_mark(pos, mark.inner.clone());
+                this.inner.add_node_mark(pos, mark.inner.inner.clone());
             });
         }
         Ok(slf.clone().unbind())
@@ -612,9 +684,9 @@ impl PyTransform {
         mark: &Bound<'_, PyAny>,
     ) -> PyResult<Py<Self>> {
         let mark = if let Ok(mark_type) = mark.cast::<PyMarkType>() {
-            MarkOrType::MarkType(mark_type.borrow().inner)
+            MarkOrType::MarkType(mark_type.borrow().inner.inner)
         } else if let Ok(mark) = mark.cast::<PyMark>() {
-            MarkOrType::Mark(mark.borrow().inner.clone())
+            MarkOrType::Mark(mark.borrow().inner.inner.clone())
         } else {
             return Err(PyValueError::new_err("mark must be a Mark or MarkType"));
         };
@@ -680,14 +752,14 @@ impl PyTransform {
                 .map(|item: Bound<'_, PyAny>| {
                     // Handle either a raw NodeType or a NodeTypeWithAttrs wrapper
                     let nt = if let Ok(py_nt) = item.cast::<PyNodeType>() {
-                        py_nt.borrow().inner.clone()
+                        py_nt.borrow().inner.inner.clone()
                     } else {
                         // Try to get `.type` attribute from NodeTypeWithAttrs
                         let type_attr = item.getattr("type")
                             .map_err(|e| PyValueError::new_err(format!("types_after items must be NodeType or NodeTypeWithAttrs: {e}")))?;
                         type_attr.cast::<PyNodeType>()
                             .map_err(|e| PyValueError::new_err(format!("types_after items must be NodeType or NodeTypeWithAttrs: {e}")))?
-                            .borrow().inner.clone()
+                            .borrow().inner.inner.clone()
                     };
                     Ok::<_, PyErr>(nt)
                 })
@@ -740,7 +812,7 @@ impl PyTransform {
             let (nt, attrs) = if let Ok(nt) = item.cast::<PyNodeType>() {
                 (
                     DynamicNodeType {
-                        idx: nt.borrow().inner.idx,
+                        idx: nt.borrow().inner.inner.idx,
                     },
                     serde_json::Value::Null,
                 )
@@ -767,7 +839,7 @@ impl PyTransform {
                 };
                 (
                     DynamicNodeType {
-                        idx: nt.borrow().inner.idx,
+                        idx: nt.borrow().inner.inner.idx,
                     },
                     attrs_val,
                 )
@@ -808,7 +880,7 @@ impl PyTransform {
                     content.nodes_between(
                         from,
                         to,
-                        &mut |node: &DynamicNode, pos: usize| {
+                        &mut |node: &DynamicNode, pos: usize, _parent, _index| {
                             if node.is_textblock() {
                                 nodes.push((pos, node.clone()));
                                 return false;
@@ -816,17 +888,20 @@ impl PyTransform {
                             true
                         },
                         0,
+                        None,
                     );
                 }
             });
             let py = slf.py();
             let nt = DynamicNodeType {
-                idx: node_type.inner.idx,
+                idx: node_type.inner.inner.idx,
             };
             for (orig_pos, node) in nodes {
                 let py_node = crate::model::PyNode {
-                    schema: schema.clone(),
-                    inner: node,
+                    inner: BNode {
+                        schema: schema.clone(),
+                        inner: node,
+                    },
                 };
                 let py_node_bound = Bound::new(py, py_node)?;
                 let result = attrs.unwrap().call1((py_node_bound,))?;
@@ -848,7 +923,7 @@ impl PyTransform {
                     from,
                     to,
                     DynamicNodeType {
-                        idx: node_type.inner.idx,
+                        idx: node_type.inner.inner.idx,
                     },
                     attrs,
                 );
@@ -865,14 +940,16 @@ impl PyTransform {
         attrs: Option<&Bound<'_, PyAny>>,
         marks: Option<&Bound<'_, PyList>>,
     ) -> PyResult<Py<Self>> {
-        let node_type = node_type.map(|nt| DynamicNodeType { idx: nt.inner.idx });
+        let node_type = node_type.map(|nt| DynamicNodeType {
+            idx: nt.inner.inner.idx,
+        });
         let attrs = attrs.map(py_to_json).transpose()?;
         let marks = marks
             .map(|list| {
                 let mut mark_set = MarkSet::new();
                 for item in list.iter() {
                     let mark = item.cast::<PyMark>()?.borrow();
-                    mark_set.add(&mark.inner);
+                    mark_set.add(&mark.inner.inner);
                 }
                 Ok::<_, PyErr>(mark_set)
             })
@@ -904,7 +981,7 @@ impl PyTransform {
 #[pyfunction(name = "lift_target")]
 pub fn py_lift_target(range: &PyNodeRange) -> PyResult<Option<usize>> {
     let nr = to_node_range(range)?;
-    Ok(range.schema.with_types(|| rs_lift_target(&nr)))
+    Ok(range.inner.schema.with_types(|| rs_lift_target(&nr)))
 }
 
 #[pyfunction(name = "can_split")]
@@ -918,14 +995,17 @@ pub fn py_can_split(
         list.iter()
             .map(|item: Bound<'_, PyAny>| {
                 let nt = item.cast::<PyNodeType>().unwrap().borrow();
-                DynamicNodeType { idx: nt.inner.idx }
+                DynamicNodeType {
+                    idx: nt.inner.inner.idx,
+                }
             })
             .collect::<Vec<_>>()
     });
     let types_after_ref = types_after.as_deref();
     Ok(doc
+        .inner
         .schema
-        .with_types(|| rs_can_split::<Dyn>(&doc.inner, pos, depth, types_after_ref)))
+        .with_types(|| rs_can_split::<Dyn>(&doc.inner.inner, pos, depth, types_after_ref)))
 }
 
 #[pyfunction(name = "find_wrapping")]
@@ -934,11 +1014,11 @@ pub fn py_find_wrapping(
     node_type: &PyNodeType,
 ) -> PyResult<Option<Vec<PyNodeType>>> {
     let range = to_node_range(range)?;
-    let result = node_type.schema.with_types(|| {
+    let result = node_type.inner.schema.with_types(|| {
         rs_find_wrapping(
             &range,
             DynamicNodeType {
-                idx: node_type.inner.idx,
+                idx: node_type.inner.inner.idx,
             },
             |_nt| true,
         )
@@ -947,9 +1027,11 @@ pub fn py_find_wrapping(
         wrappers
             .iter()
             .map(|w| PyNodeType {
-                schema: node_type.schema.clone(),
-                inner: w.node_type,
-                name: String::new(),
+                inner: prosemirror::binding::model::BNodeType::new(
+                    node_type.inner.schema.clone(),
+                    w.node_type,
+                    String::new(),
+                ),
             })
             .collect()
     }))
@@ -958,15 +1040,17 @@ pub fn py_find_wrapping(
 #[pyfunction(name = "can_join")]
 pub fn py_can_join(doc: &PyNode, pos: usize) -> PyResult<bool> {
     Ok(doc
+        .inner
         .schema
-        .with_types(|| rs_can_join::<Dyn>(&doc.inner, pos).unwrap_or(false)))
+        .with_types(|| rs_can_join::<Dyn>(&doc.inner.inner, pos).unwrap_or(false)))
 }
 
 #[pyfunction(name = "join_point")]
 pub fn py_join_point(doc: &PyNode, pos: usize, dir: Option<i32>) -> PyResult<Option<usize>> {
     Ok(doc
+        .inner
         .schema
-        .with_types(|| rs_join_point::<Dyn>(&doc.inner, pos, dir)))
+        .with_types(|| rs_join_point::<Dyn>(&doc.inner.inner, pos, dir)))
 }
 
 #[pyfunction(name = "insert_point")]
@@ -975,12 +1059,12 @@ pub fn py_insert_point(
     pos: usize,
     node_type: &PyNodeType,
 ) -> PyResult<Option<usize>> {
-    Ok(doc.schema.with_types(|| {
+    Ok(doc.inner.schema.with_types(|| {
         rs_insert_point::<Dyn>(
-            &doc.inner,
+            &doc.inner.inner,
             pos,
             DynamicNodeType {
-                idx: node_type.inner.idx,
+                idx: node_type.inner.inner.idx,
             },
         )
     }))
@@ -993,8 +1077,9 @@ pub fn py_drop_point(
     slice: &crate::model::PySlice,
 ) -> PyResult<Option<usize>> {
     Ok(doc
+        .inner
         .schema
-        .with_types(|| rs_drop_point::<Dyn>(&doc.inner, pos, &slice.inner)))
+        .with_types(|| rs_drop_point::<Dyn>(&doc.inner.inner, pos, &slice.inner.inner)))
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,11 +1087,11 @@ pub fn py_drop_point(
 // ---------------------------------------------------------------------------
 
 pub(crate) fn to_node_range(nr: &crate::model::PyNodeRange) -> PyResult<NodeRange<'_, Dyn>> {
-    nr.schema.with_types(|| {
-        let from = prosemirror::model::ResolvedPos::resolve(&nr.from_doc, nr.from_pos)
+    nr.inner.schema.with_types(|| {
+        let from = prosemirror::model::ResolvedPos::resolve(&nr.inner.doc, nr.inner.from_pos)
             .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-        let to = prosemirror::model::ResolvedPos::resolve(&nr.from_doc, nr.to_pos)
+        let to = prosemirror::model::ResolvedPos::resolve(&nr.inner.doc, nr.inner.to_pos)
             .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-        Ok(NodeRange::new(from, to, nr.depth))
+        Ok(NodeRange::new(from, to, nr.inner.depth))
     })
 }

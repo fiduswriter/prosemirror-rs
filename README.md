@@ -11,6 +11,25 @@ This crate implements the same functionality as:
 The canonical references are the **JavaScript** source (primary) and **Python** port
 (secondary). The Rust implementation aims to produce identical results.
 
+It ships as a single npm package — `prosemirror-rs` — that auto-dispatches to a
+native addon in Node.js and WebAssembly in the browser, so existing ProseMirror
+packages (view, state, commands, etc.) can use it as a drop-in replacement for
+both `prosemirror-model` and `prosemirror-transform`.
+
+## Demos
+
+Live browser demos running prosemirror-rs via WebAssembly are hosted on GitHub Pages:
+
+**[→ View demos](https://fiduswriter.github.io/prosemirror-rs)**
+
+The demos use [Rspack](https://rspack.dev) to bundle the application and alias
+`prosemirror-model` / `prosemirror-transform` to `prosemirror-rs` so that all
+ProseMirror packages automatically use the Rust implementation.
+
+- **Basic** — a simple rich-text editor with formatting, lists, and history.
+- **Advanced** — two side-by-side editors with simulated real-time collaboration
+  and tables.
+
 ## Quick start
 
 ### Add to your project
@@ -329,6 +348,14 @@ Generated JSON files in `tests/spec/expected/`:
 
 This crate currently defines no Cargo feature flags.
 
+## API coverage
+
+The Node.js, browser (WebAssembly), and Python bindings expose the full public
+API documented at <https://prosemirror.net/docs/ref/> for both
+[`prosemirror-model`](https://prosemirror.net/docs/ref/#model) and
+[`prosemirror-transform`](https://prosemirror.net/docs/ref/#transform), including
+DOM serialization via `DOMSerializer` and `DOMParser`.
+
 ## Differences from JS/Python
 
 - **Compile-time schema support** — The `Schema` trait and associated types
@@ -336,8 +363,6 @@ This crate currently defines no Cargo feature flags.
   `dynamic` module provides the runtime-loadable equivalent.
 - **UTF-16 position tracking** — Like JavaScript, positions are counted in
   UTF-16 code units. The `Text` type tracks both UTF-8 and UTF-16 lengths.
-- **No DOM parsing/serialization** — Server-side crate; HTML round-trip is
-  not included.
 
 ## Releasing a new version
 

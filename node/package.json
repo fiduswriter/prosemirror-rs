@@ -1,20 +1,52 @@
 {
   "name": "prosemirror-rs",
   "version": "0.4.1",
-  "description": "Node.js bindings for prosemirror-rs: a Rust implementation of ProseMirror's document model and transform pipeline",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "description": "Rust-powered drop-in replacement for prosemirror-model and prosemirror-transform — native addon in Node.js, WebAssembly everywhere else",
+  "main": "npm/napi/index.js",
+  "types": "npm/index.d.ts",
+  "exports": {
+    ".": {
+      "node": "./npm/napi/index.js",
+      "browser": "./npm/wasm/index.js",
+      "default": "./npm/wasm/index.js"
+    },
+    "./model": {
+      "node": "./npm/model.js",
+      "browser": "./npm/model.js",
+      "default": "./npm/model.js"
+    },
+    "./transform": {
+      "node": "./npm/transform.js",
+      "browser": "./npm/transform.js",
+      "default": "./npm/transform.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "model": ["./npm/model.d.ts"],
+      "transform": ["./npm/transform.d.ts"]
+    }
+  },
+  "files": [
+    "npm/"
+  ],
   "scripts": {
     "build": "cargo build --release && node copy-artifact.mjs",
-    "test": "npm run build && node --test tests/editor.test.js",
-    "test:upstream": "node run-upstream-tests.mjs"
+    "test": "npm run build && node --test tests/*.test.js",
+    "build:wasm": "cd ../wasm && wasm-pack build --target web --out-dir ../node/npm/wasm && wasm-pack build --target nodejs --out-dir ../node/npm/wasm-nodejs",
+    "test:wasm": "npm run build:wasm && node --test tests/wasm-smoke.test.cjs",
+    "test:upstream": "node run-upstream-tests.mjs",
+    "test:all": "npm test && npm run test:upstream && npm run test:wasm"
   },
   "keywords": [
     "prosemirror",
+    "prosemirror-model",
+    "prosemirror-transform",
     "collaborative-editing",
     "editor",
     "document",
     "napi",
+    "wasm",
     "rust"
   ],
   "license": "MIT",

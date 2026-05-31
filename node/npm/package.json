@@ -1,0 +1,73 @@
+{
+  "name": "prosemirror-rs",
+  "version": "0.4.1",
+  "description": "Rust-powered drop-in replacement for prosemirror-model and prosemirror-transform — native addon in Node.js, WebAssembly everywhere else",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "node": "./napi/index.js",
+      "browser": "./wasm/index.js",
+      "default": "./wasm/index.js"
+    },
+    "./model": {
+      "node": "./model.js",
+      "browser": "./model.js",
+      "default": "./model.js"
+    },
+    "./transform": {
+      "node": "./transform.js",
+      "browser": "./transform.js",
+      "default": "./transform.js"
+    }
+  },
+  "types": "./index.d.ts",
+  "typesVersions": {
+    "*": {
+      "model": ["./model.d.ts"],
+      "transform": ["./transform.d.ts"]
+    }
+  },
+  "files": [
+    "index.d.ts",
+    "model.js",
+    "model.d.ts",
+    "transform.js",
+    "transform.d.ts",
+    "dom.js",
+    "dom.d.ts",
+    "patch.js",
+    "to-dom.js",
+    "from-dom.js",
+    "napi/index.js",
+    "napi/*.node",
+    "wasm/index.js",
+    "wasm/*.js",
+    "wasm/*.wasm"
+  ],
+  "keywords": [
+    "prosemirror",
+    "prosemirror-model",
+    "prosemirror-transform",
+    "collaborative-editing",
+    "editor",
+    "document",
+    "napi",
+    "wasm",
+    "rust"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fiduswriter/prosemirror-rs"
+  },
+  "homepage": "https://github.com/fiduswriter/prosemirror-rs#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "ist": "^1.1.7",
+    "mocha": "^11.7.6"
+  },
+  "dependencies": {
+    "prosemirror-test-builder": "^1.1.1"
+  }
+}

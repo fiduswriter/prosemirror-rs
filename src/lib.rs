@@ -10,6 +10,7 @@
 #[macro_use]
 extern crate derive_new;
 
+pub mod binding;
 pub mod dynamic;
 pub mod editor;
 pub mod model;

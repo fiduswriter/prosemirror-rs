@@ -530,6 +530,7 @@ impl ParsedContentMatch {
     }
 
     /// Match a single node type, returning the next match state if successful.
+    /// Uses the node type's index to look up the name in this content match's schema.
     pub fn match_type(&self, node_type: DynamicNodeType) -> Option<Self> {
         let name = self.schema.node_types.get(node_type.idx)?.name.clone();
         let next_state = self.expr.match_type(self.state, &name)?;
@@ -540,13 +541,26 @@ impl ParsedContentMatch {
         })
     }
 
+    /// Match a node type by name (cross-schema safe).
+    pub fn match_type_by_name(&self, name: &str) -> Option<Self> {
+        let next_state = self.expr.match_type(self.state, name)?;
+        Some(ParsedContentMatch {
+            expr: self.expr.clone(),
+            schema: self.schema.clone(),
+            state: next_state,
+        })
+    }
+
     /// Match a fragment of nodes, returning the final match state if successful.
+    /// Uses each child's type_name field (cross-schema safe).
     pub fn match_fragment(&self, fragment: &Fragment<Dyn>) -> Option<Self> {
         let mut state = self.state;
         for i in 0..fragment.child_count() {
             let child = fragment.child(i);
-            let name = self.schema.node_types.get(child.r#type().idx)?.name.clone();
-            state = self.expr.match_type(state, &name)?;
+            // Use stored type_name directly instead of index lookup — this is
+            // cross-schema safe because type_name is stored by value on each node.
+            let name = &child.type_name;
+            state = self.expr.match_type(state, name)?;
         }
         Some(ParsedContentMatch {
             expr: self.expr.clone(),
@@ -557,32 +571,173 @@ impl ParsedContentMatch {
 
     /// Try to find a fragment of nodes that can be inserted before `after`
     /// to make the content match.
+    /// The caller is expected to have set the thread-local schema context via
+    /// DynamicSchema::with_types() before calling this method.
     pub fn fill_before(
         &self,
         after: &Fragment<Dyn>,
         to_end: bool,
         start_index: usize,
     ) -> Option<Fragment<Dyn>> {
-        self.schema.with_types(|| {
-            with_types(|store| {
-                let mut seen = std::collections::HashSet::new();
-                seen.insert(self.state);
-                let mut types = Vec::new();
-                let result = fill_before_search(
-                    &self.expr,
-                    self.state,
-                    after,
-                    start_index,
-                    to_end,
-                    &mut seen,
-                    &mut types,
-                    store,
-                    0,
-                )?;
-                Some(Fragment::from(result))
-            })
-            .flatten()
+        with_types(|store| {
+            let mut seen = std::collections::HashSet::new();
+            seen.insert(self.state);
+            let mut types = Vec::new();
+            let result = fill_before_search(
+                &self.expr,
+                self.state,
+                after,
+                start_index,
+                to_end,
+                &mut seen,
+                &mut types,
+                store,
+                0,
+            )?;
+            Some(Fragment::from(result))
         })
+        .flatten()
+    }
+
+    /// The number of outgoing edges from the current DFA state.
+    pub fn edge_count(&self) -> usize {
+        self.expr.edge_count(self.state)
+    }
+
+    /// The n-th outgoing edge: returns `(node_type, next_match_state)`.
+    pub fn edge(&self, n: usize) -> Option<(DynamicNodeType, Self)> {
+        let (name, next_state) = self.expr.edge(self.state, n)?;
+        let node_type_idx = self
+            .schema
+            .node_types
+            .iter()
+            .position(|nt| nt.name == name)?;
+        Some((
+            DynamicNodeType { idx: node_type_idx },
+            ParsedContentMatch {
+                expr: self.expr.clone(),
+                schema: self.schema.clone(),
+                state: next_state,
+            },
+        ))
+    }
+
+    /// The default node type for filling a position (the first edge whose
+    /// node type has no required attributes and whose own content match can
+    /// reach a valid end).
+    pub fn default_type(&self) -> Option<DynamicNodeType> {
+        for i in 0..self.edge_count() {
+            let Some((nt, _)) = self.edge(i) else {
+                continue;
+            };
+            let Some(data) = self.schema.node_types.get(nt.idx) else {
+                continue;
+            };
+            if !data.has_required_attrs {
+                return Some(nt);
+            }
+        }
+        None
+    }
+
+    /// BFS-based wrapping search (mirrors JS `ContentMatch.findWrapping`).
+    /// Returns the shortest list of wrapper node types needed to wrap `target`
+    /// inside the current content match position, or `None` if impossible.
+    pub fn find_wrapping(&self, target: DynamicNodeType) -> Option<Vec<DynamicNodeType>> {
+        let target_name = self.schema.node_types.get(target.idx)?.name.clone();
+        if self.expr.match_type(self.state, &target_name).is_some() {
+            return Some(Vec::new());
+        }
+        // BFS through wrapper types.
+        struct WrapEntry {
+            expr: crate::dynamic::content_expr::ContentExpr,
+            state: usize,
+            wrapper_type: Option<usize>,
+            via: Option<usize>,
+        }
+        let mut active: Vec<WrapEntry> = Vec::new();
+        active.push(WrapEntry {
+            expr: self.expr.clone(),
+            state: self.state,
+            wrapper_type: None,
+            via: None,
+        });
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut queue_idx = 0;
+        while queue_idx < active.len() {
+            let current_state = active[queue_idx].state;
+            let current_wrapper = active[queue_idx].wrapper_type;
+            let current_via = active[queue_idx].via;
+            let current_expr = active[queue_idx].expr.clone();
+            queue_idx += 1;
+            if current_expr
+                .match_type(current_state, &target_name)
+                .is_some()
+            {
+                // Reconstruct the wrapper path.
+                let mut result = Vec::new();
+                if let Some(idx) = current_wrapper {
+                    result.push(DynamicNodeType { idx });
+                }
+                let mut next_via = current_via;
+                while let Some(v) = next_via {
+                    let entry = &active[v];
+                    if let Some(idx) = entry.wrapper_type {
+                        result.push(DynamicNodeType { idx });
+                    }
+                    next_via = entry.via;
+                }
+                result.reverse();
+                return Some(result);
+            }
+            for i in 0..current_expr.edge_count(current_state) {
+                let Some((name, next_state)) = current_expr.edge(current_state, i) else {
+                    continue;
+                };
+                let Some(node_type_idx) =
+                    self.schema.node_types.iter().position(|nt| nt.name == name)
+                else {
+                    continue;
+                };
+                let nt = &self.schema.node_types[node_type_idx];
+                if nt.atom || nt.has_required_attrs {
+                    continue;
+                }
+                if !seen.insert(name.to_string()) {
+                    continue;
+                }
+                if current_wrapper.is_some() && !current_expr.valid_end(next_state) {
+                    continue;
+                }
+                let wrapper_expr = self.schema.content_exprs.get(nt.content_expr_idx)?.clone();
+                active.push(WrapEntry {
+                    expr: wrapper_expr,
+                    state: 0,
+                    wrapper_type: Some(node_type_idx),
+                    via: Some(queue_idx - 1),
+                });
+            }
+        }
+        None
+    }
+
+    /// Create a `ParsedContentMatch` from a `DynamicContentMatch`, cloning
+    /// the relevant `ContentExpr` from the thread-local type store.
+    /// **Must be called while the thread-local store is active** (i.e., inside
+    /// a `schema.with_types(|| …)` closure).
+    pub fn from_dynamic(
+        dcm: DynamicContentMatch,
+        schema: std::sync::Arc<DynamicSchema>,
+    ) -> Option<Self> {
+        with_types(|store| {
+            let expr = store.content_exprs.get(dcm.expr_idx)?.clone();
+            Some(ParsedContentMatch {
+                expr,
+                schema: schema.clone(),
+                state: dcm.state,
+            })
+        })
+        .flatten()
     }
 }
 
@@ -614,7 +769,8 @@ fn fill_before_search(
     let mut can_match = true;
     for i in start_index..after.child_count() {
         if let Some(child) = after.maybe_child(i) {
-            let name = &store.node_types[child.r#type().idx].name;
+            // Use stored type_name directly (cross-schema safe)
+            let name = &child.type_name;
             match expr.match_type(match_state, name) {
                 Some(next) => match_state = next,
                 None => {
