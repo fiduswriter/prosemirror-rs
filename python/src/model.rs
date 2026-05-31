@@ -1041,80 +1041,103 @@ impl PyFragment {
         f: Py<PyAny>,
         node_start: usize,
     ) -> PyResult<()> {
-        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
-        self.inner.schema.with_types(|| {
+        let schema = self.inner.schema.clone();
+        let mut err: Option<pyo3::PyErr> = None;
+        schema.with_types(|| {
             self.inner.inner.nodes_between(
                 from_,
                 to,
                 &mut |n, p, parent, index| {
-                    items.push((n.clone(), p, parent.cloned(), index));
-                    true
+                    if err.is_some() {
+                        return false;
+                    }
+                    let result = (|| -> PyResult<bool> {
+                        let py_node = PyNode {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: n.clone(),
+                            },
+                        };
+                        let py_parent = parent.map(|par| PyNode {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: par.clone(),
+                            },
+                        });
+                        let ret = f.call1(py, (py_node, p, py_parent, index))?;
+                        // Only strict Python `False` suppresses recursion.
+                        if let Ok(b) = ret.extract::<bool>(py) {
+                            if !b {
+                                return Ok(false);
+                            }
+                        }
+                        Ok(true)
+                    })();
+                    match result {
+                        Ok(v) => v,
+                        Err(e) => {
+                            err = Some(e);
+                            false
+                        }
+                    }
                 },
                 node_start,
                 None,
             );
         });
-        for (node, pos, parent, index) in items {
-            let py_parent = parent.map(|par| PyNode {
-                inner: BNode {
-                    schema: self.inner.schema.clone(),
-                    inner: par,
-                },
-            });
-            f.call1(
-                py,
-                (
-                    PyNode {
-                        inner: BNode {
-                            schema: self.inner.schema.clone(),
-                            inner: node,
-                        },
-                    },
-                    pos,
-                    py_parent,
-                    index,
-                ),
-            )?;
+        if let Some(e) = err {
+            return Err(e);
         }
         Ok(())
     }
 
     fn descendants(&self, py: Python<'_>, f: Py<PyAny>) -> PyResult<()> {
-        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
-        self.inner.schema.with_types(|| {
-            let size = self.inner.inner.size();
+        let schema = self.inner.schema.clone();
+        let mut err: Option<pyo3::PyErr> = None;
+        let size = self.inner.inner.size();
+        schema.with_types(|| {
             self.inner.inner.nodes_between(
                 0,
                 size,
                 &mut |n, p, parent, index| {
-                    items.push((n.clone(), p, parent.cloned(), index));
-                    true
+                    if err.is_some() {
+                        return false;
+                    }
+                    let result = (|| -> PyResult<bool> {
+                        let py_node = PyNode {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: n.clone(),
+                            },
+                        };
+                        let py_parent = parent.map(|par| PyNode {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: par.clone(),
+                            },
+                        });
+                        let ret = f.call1(py, (py_node, p, py_parent, index))?;
+                        if let Ok(b) = ret.extract::<bool>(py) {
+                            if !b {
+                                return Ok(false);
+                            }
+                        }
+                        Ok(true)
+                    })();
+                    match result {
+                        Ok(v) => v,
+                        Err(e) => {
+                            err = Some(e);
+                            false
+                        }
+                    }
                 },
                 0,
                 None,
             );
         });
-        for (node, pos, parent, index) in items {
-            let py_parent = parent.map(|par| PyNode {
-                inner: BNode {
-                    schema: self.inner.schema.clone(),
-                    inner: par,
-                },
-            });
-            f.call1(
-                py,
-                (
-                    PyNode {
-                        inner: BNode {
-                            schema: self.inner.schema.clone(),
-                            inner: node,
-                        },
-                    },
-                    pos,
-                    py_parent,
-                    index,
-                ),
-            )?;
+        if let Some(e) = err {
+            return Err(e);
         }
         Ok(())
     }
@@ -1500,87 +1523,98 @@ impl PyNode {
         f: Py<PyAny>,
         start_pos: usize,
     ) -> PyResult<()> {
-        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
-        self.inner
-            .nodes_between(from_, to, &mut |n, p, parent, index| {
-                items.push((n.clone(), p, parent.cloned(), index));
-                true // always recurse — early-termination via false not yet supported
-            });
-        // Re-run with start_pos offset if needed — BNode::nodes_between always uses 0.
-        // For now, collect from the raw inner to respect start_pos:
-        let _ = items; // discard BNode result; re-collect with start_pos
-        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
-        self.inner.schema.with_types(|| {
+        let schema = self.inner.schema.clone();
+        let mut err: Option<pyo3::PyErr> = None;
+        schema.with_types(|| {
             <DynamicNode as Node<Dyn>>::nodes_between(
                 &self.inner.inner,
                 from_,
                 to,
                 &mut |n, p, parent, index| {
-                    items.push((n.clone(), p, parent.cloned(), index));
-                    true
+                    if err.is_some() {
+                        return false;
+                    }
+                    let result = (|| -> PyResult<bool> {
+                        let py_node = PyNode {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: n.clone(),
+                            },
+                        };
+                        let py_parent = parent.map(|par| PyNode {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: par.clone(),
+                            },
+                        });
+                        let ret = f.call1(py, (py_node, p, py_parent, index))?;
+                        if let Ok(b) = ret.extract::<bool>(py) {
+                            if !b {
+                                return Ok(false);
+                            }
+                        }
+                        Ok(true)
+                    })();
+                    match result {
+                        Ok(v) => v,
+                        Err(e) => {
+                            err = Some(e);
+                            false
+                        }
+                    }
                 },
                 start_pos,
             );
         });
-        for (node, pos, parent, index) in items {
-            let py_parent = parent.map(|par| PyNode {
-                inner: BNode {
-                    schema: self.inner.schema.clone(),
-                    inner: par,
-                },
-            });
-            let ret = f.call1(
-                py,
-                (
-                    PyNode {
-                        inner: BNode {
-                            schema: self.inner.schema.clone(),
-                            inner: node,
-                        },
-                    },
-                    pos,
-                    py_parent,
-                    index,
-                ),
-            )?;
-            let _ = ret;
+        if let Some(e) = err {
+            return Err(e);
         }
         Ok(())
     }
 
     fn descendants(&self, py: Python<'_>, f: Py<PyAny>) -> PyResult<()> {
-        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
-        self.inner.schema.with_types(|| {
+        let schema = self.inner.schema.clone();
+        let mut err: Option<pyo3::PyErr> = None;
+        schema.with_types(|| {
             <DynamicNode as Node<Dyn>>::descendants(
                 &self.inner.inner,
                 &mut |n, p, parent, index| {
-                    items.push((n.clone(), p, parent.cloned(), index));
-                    true
+                    if err.is_some() {
+                        return false;
+                    }
+                    let result = (|| -> PyResult<bool> {
+                        let py_node = PyNode {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: n.clone(),
+                            },
+                        };
+                        let py_parent = parent.map(|par| PyNode {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: par.clone(),
+                            },
+                        });
+                        let ret = f.call1(py, (py_node, p, py_parent, index))?;
+                        if let Ok(b) = ret.extract::<bool>(py) {
+                            if !b {
+                                return Ok(false);
+                            }
+                        }
+                        Ok(true)
+                    })();
+                    match result {
+                        Ok(v) => v,
+                        Err(e) => {
+                            err = Some(e);
+                            false
+                        }
+                    }
                 },
             );
         });
-        for (node, pos, parent, index) in items {
-            let py_parent = parent.map(|par| PyNode {
-                inner: BNode {
-                    schema: self.inner.schema.clone(),
-                    inner: par,
-                },
-            });
-            let ret = f.call1(
-                py,
-                (
-                    PyNode {
-                        inner: BNode {
-                            schema: self.inner.schema.clone(),
-                            inner: node,
-                        },
-                    },
-                    pos,
-                    py_parent,
-                    index,
-                ),
-            )?;
-            let _ = ret;
+        if let Some(e) = err {
+            return Err(e);
         }
         Ok(())
     }

@@ -329,6 +329,13 @@ Generated JSON files in `tests/spec/expected/`:
 
 This crate currently defines no Cargo feature flags.
 
+## API coverage
+
+The Node.js and Python bindings expose the full public API documented at
+<https://prosemirror.net/docs/ref/> for both
+[`prosemirror-model`](https://prosemirror.net/docs/ref/#model) and
+[`prosemirror-transform`](https://prosemirror.net/docs/ref/#transform).
+
 ## Differences from JS/Python
 
 - **Compile-time schema support** — The `Schema` trait and associated types

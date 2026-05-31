@@ -486,3 +486,69 @@ describe("ContentMatch", () => {
     assert.equal(parsed.validEnd, true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// nodesBetween / descendants early-termination (returning false stops recursion)
+// ---------------------------------------------------------------------------
+
+describe("nodesBetween / descendants early-termination", () => {
+  // doc with nested structure: doc > blockquote > paragraph > text
+  const NESTED_SCHEMA = new Schema({
+    nodes: {
+      doc: { content: "block+" },
+      blockquote: { content: "block+", group: "block" },
+      paragraph: { content: "inline*", group: "block" },
+      text: { group: "inline" },
+    },
+    marks: {},
+  });
+  const doc = NESTED_SCHEMA.node("doc", {}, [
+    NESTED_SCHEMA.node("blockquote", {}, [
+      NESTED_SCHEMA.node("paragraph", {}, [NESTED_SCHEMA.text("hello")]),
+    ]),
+  ]);
+
+  test("Node.nodesBetween: returning false skips children", () => {
+    const visited = [];
+    doc.nodesBetween(0, doc.content.size, (node, pos, parent, index) => {
+      visited.push(node.type.name);
+      if (node.type.name === "blockquote") return false; // don't descend
+    });
+    assert.ok(visited.includes("blockquote"), "blockquote should be visited");
+    assert.ok(!visited.includes("paragraph"), "paragraph should be skipped");
+    assert.ok(!visited.includes("text"), "text should be skipped");
+  });
+
+  test("Node.nodesBetween: returning true recurses normally", () => {
+    const visited = [];
+    doc.nodesBetween(0, doc.content.size, (node) => {
+      visited.push(node.type.name);
+      return true;
+    });
+    assert.ok(visited.includes("blockquote"));
+    assert.ok(visited.includes("paragraph"));
+    assert.ok(visited.includes("text"));
+  });
+
+  test("Node.descendants: returning false skips children", () => {
+    const visited = [];
+    doc.descendants((node) => {
+      visited.push(node.type.name);
+      if (node.type.name === "blockquote") return false;
+    });
+    assert.ok(visited.includes("blockquote"));
+    assert.ok(!visited.includes("paragraph"));
+    assert.ok(!visited.includes("text"));
+  });
+
+  test("Fragment.nodesBetween: returning false skips children", () => {
+    const frag = doc.content;
+    const visited = [];
+    frag.nodesBetween(0, frag.size, (node) => {
+      visited.push(node.type.name);
+      if (node.type.name === "blockquote") return false;
+    });
+    assert.ok(visited.includes("blockquote"));
+    assert.ok(!visited.includes("paragraph"));
+  });
+});

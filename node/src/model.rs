@@ -761,91 +761,128 @@ impl Fragment_ {
 
     #[napi(js_name = "nodesBetween")]
     pub fn nodes_between(&self, env: Env, from: u32, to: u32, f: JsFunction) -> napi::Result<()> {
-        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
+        let schema = self.inner.schema.clone();
+        let mut err: Option<napi::Error> = None;
         self.inner.nodes_between(
             from as usize,
             to as usize,
             &mut |node: &DynamicNode, pos, parent, index| {
-                items.push((node.clone(), pos, parent.cloned(), index));
-                true
-            },
-        );
-        for (node, pos, parent, index) in items {
-            let n = Node_ {
-                inner: BNode {
-                    schema: self.inner.schema.clone(),
-                    inner: node,
-                },
-            };
-            let js_parent = match parent {
-                Some(p) => {
-                    let pn = Node_ {
+                if err.is_some() {
+                    return false;
+                }
+                let result = (|| -> napi::Result<bool> {
+                    let n = Node_ {
                         inner: BNode {
-                            schema: self.inner.schema.clone(),
-                            inner: p,
+                            schema: schema.clone(),
+                            inner: node.clone(),
                         },
                     };
-                    pn.into_instance(env)?.as_object(env).into_unknown()
+                    let js_parent = match parent {
+                        Some(p) => Node_ {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: p.clone(),
+                            },
+                        }
+                        .into_instance(env)?
+                        .as_object(env)
+                        .into_unknown(),
+                        None => env.get_null()?.into_unknown(),
+                    };
+                    let ret = f.call(
+                        None,
+                        &[
+                            n.into_instance(env)?.as_object(env).into_unknown(),
+                            env.create_uint32(pos as u32)?.into_unknown(),
+                            js_parent,
+                            env.create_uint32(index as u32)?.into_unknown(),
+                        ],
+                    )?;
+                    // Only strict `false` suppresses recursion — matches JS ProseMirror contract.
+                    if let Ok(b) = ret.coerce_to_bool() {
+                        if !b.get_value()? {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                })();
+                match result {
+                    Ok(v) => v,
+                    Err(e) => {
+                        err = Some(e);
+                        false
+                    }
                 }
-                None => env.get_null()?.into_unknown(),
-            };
-            f.call(
-                None,
-                &[
-                    n.into_instance(env)?.as_object(env).into_unknown(),
-                    env.create_uint32(pos as u32)?.into_unknown(),
-                    js_parent,
-                    env.create_uint32(index as u32)?.into_unknown(),
-                ],
-            )?;
+            },
+        );
+        if let Some(e) = err {
+            return Err(e);
         }
         Ok(())
     }
 
     #[napi]
     pub fn descendants(&self, env: Env, f: JsFunction) -> napi::Result<()> {
-        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
+        let schema = self.inner.schema.clone();
+        let mut err: Option<napi::Error> = None;
         let size = self.inner.inner.size();
         self.inner.schema.with_types(|| {
             self.inner.inner.nodes_between(
                 0,
                 size,
                 &mut |node: &DynamicNode, pos, parent, index| {
-                    items.push((node.clone(), pos, parent.cloned(), index));
-                    true
+                    if err.is_some() {
+                        return false;
+                    }
+                    let result = (|| -> napi::Result<bool> {
+                        let n = Node_ {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: node.clone(),
+                            },
+                        };
+                        let js_parent = match parent {
+                            Some(p) => Node_ {
+                                inner: BNode {
+                                    schema: schema.clone(),
+                                    inner: p.clone(),
+                                },
+                            }
+                            .into_instance(env)?
+                            .as_object(env)
+                            .into_unknown(),
+                            None => env.get_null()?.into_unknown(),
+                        };
+                        let ret = f.call(
+                            None,
+                            &[
+                                n.into_instance(env)?.as_object(env).into_unknown(),
+                                env.create_uint32(pos as u32)?.into_unknown(),
+                                js_parent,
+                                env.create_uint32(index as u32)?.into_unknown(),
+                            ],
+                        )?;
+                        if let Ok(b) = ret.coerce_to_bool() {
+                            if !b.get_value()? {
+                                return Ok(false);
+                            }
+                        }
+                        Ok(true)
+                    })();
+                    match result {
+                        Ok(v) => v,
+                        Err(e) => {
+                            err = Some(e);
+                            false
+                        }
+                    }
                 },
                 0,
                 None,
             );
         });
-        for (node, pos, parent, index) in items {
-            let n = Node_ {
-                inner: BNode {
-                    schema: self.inner.schema.clone(),
-                    inner: node,
-                },
-            };
-            let js_parent = match parent {
-                Some(p) => {
-                    let pn = Node_ {
-                        inner: BNode {
-                            schema: self.inner.schema.clone(),
-                            inner: p,
-                        },
-                    };
-                    pn.into_instance(env)?.as_object(env).into_unknown()
-                }
-                None => env.get_null()?.into_unknown(),
-            };
-            f.call(
-                None,
-                &[
-                    n.into_instance(env)?.as_object(env).into_unknown(),
-                    env.create_uint32(pos as u32)?.into_unknown(),
-                    js_parent,
-                    env.create_uint32(index as u32)?.into_unknown(),
-                ],
-            )?;
+        if let Some(e) = err {
+            return Err(e);
         }
         Ok(())
     }
@@ -1144,83 +1181,119 @@ impl Node_ {
     #[napi(js_name = "nodesBetween")]
     #[allow(clippy::too_many_arguments)]
     pub fn nodes_between(&self, env: Env, from: u32, to: u32, f: JsFunction) -> napi::Result<()> {
-        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
+        let schema = self.inner.schema.clone();
+        let mut err: Option<napi::Error> = None;
         self.inner.nodes_between(
             from as usize,
             to as usize,
             &mut |node: &DynamicNode, pos, parent, index| {
-                items.push((node.clone(), pos, parent.cloned(), index));
-                true
-            },
-        );
-        for (node, pos, parent, index) in items {
-            let n = Node_ {
-                inner: BNode {
-                    schema: self.inner.schema.clone(),
-                    inner: node,
-                },
-            };
-            let js_parent = match parent {
-                Some(p) => {
-                    let pn = Node_ {
+                if err.is_some() {
+                    return false;
+                }
+                let result = (|| -> napi::Result<bool> {
+                    let n = Node_ {
                         inner: BNode {
-                            schema: self.inner.schema.clone(),
-                            inner: p,
+                            schema: schema.clone(),
+                            inner: node.clone(),
                         },
                     };
-                    pn.into_instance(env)?.as_object(env).into_unknown()
+                    let js_parent = match parent {
+                        Some(p) => Node_ {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: p.clone(),
+                            },
+                        }
+                        .into_instance(env)?
+                        .as_object(env)
+                        .into_unknown(),
+                        None => env.get_null()?.into_unknown(),
+                    };
+                    let ret = f.call(
+                        None,
+                        &[
+                            n.into_instance(env)?.as_object(env).into_unknown(),
+                            env.create_uint32(pos as u32)?.into_unknown(),
+                            js_parent,
+                            env.create_uint32(index as u32)?.into_unknown(),
+                        ],
+                    )?;
+                    if let Ok(b) = ret.coerce_to_bool() {
+                        if !b.get_value()? {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                })();
+                match result {
+                    Ok(v) => v,
+                    Err(e) => {
+                        err = Some(e);
+                        false
+                    }
                 }
-                None => env.get_null()?.into_unknown(),
-            };
-            f.call(
-                None,
-                &[
-                    n.into_instance(env)?.as_object(env).into_unknown(),
-                    env.create_uint32(pos as u32)?.into_unknown(),
-                    js_parent,
-                    env.create_uint32(index as u32)?.into_unknown(),
-                ],
-            )?;
+            },
+        );
+        if let Some(e) = err {
+            return Err(e);
         }
         Ok(())
     }
 
     #[napi]
     pub fn descendants(&self, env: Env, f: JsFunction) -> napi::Result<()> {
-        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
+        let schema = self.inner.schema.clone();
+        let mut err: Option<napi::Error> = None;
         self.inner
             .descendants(&mut |node: &DynamicNode, pos, parent, index| {
-                items.push((node.clone(), pos, parent.cloned(), index));
-                true
-            });
-        for (node, pos, parent, index) in items {
-            let n = Node_ {
-                inner: BNode {
-                    schema: self.inner.schema.clone(),
-                    inner: node,
-                },
-            };
-            let js_parent = match parent {
-                Some(p) => {
-                    let pn = Node_ {
+                if err.is_some() {
+                    return false;
+                }
+                let result = (|| -> napi::Result<bool> {
+                    let n = Node_ {
                         inner: BNode {
-                            schema: self.inner.schema.clone(),
-                            inner: p,
+                            schema: schema.clone(),
+                            inner: node.clone(),
                         },
                     };
-                    pn.into_instance(env)?.as_object(env).into_unknown()
+                    let js_parent = match parent {
+                        Some(p) => Node_ {
+                            inner: BNode {
+                                schema: schema.clone(),
+                                inner: p.clone(),
+                            },
+                        }
+                        .into_instance(env)?
+                        .as_object(env)
+                        .into_unknown(),
+                        None => env.get_null()?.into_unknown(),
+                    };
+                    let ret = f.call(
+                        None,
+                        &[
+                            n.into_instance(env)?.as_object(env).into_unknown(),
+                            env.create_uint32(pos as u32)?.into_unknown(),
+                            js_parent,
+                            env.create_uint32(index as u32)?.into_unknown(),
+                        ],
+                    )?;
+                    if let Ok(b) = ret.coerce_to_bool() {
+                        if !b.get_value()? {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                })();
+                match result {
+                    Ok(v) => v,
+                    Err(e) => {
+                        err = Some(e);
+                        false
+                    }
                 }
-                None => env.get_null()?.into_unknown(),
-            };
-            f.call(
-                None,
-                &[
-                    n.into_instance(env)?.as_object(env).into_unknown(),
-                    env.create_uint32(pos as u32)?.into_unknown(),
-                    js_parent,
-                    env.create_uint32(index as u32)?.into_unknown(),
-                ],
-            )?;
+            });
+        if let Some(e) = err {
+            return Err(e);
         }
         Ok(())
     }
