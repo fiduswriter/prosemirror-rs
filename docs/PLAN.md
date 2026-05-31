@@ -52,36 +52,22 @@ import { Editor } from "prosemirror-rs";
 | `npm test` (napi unit) | 97 | ✅ |
 | `npm run test:upstream` (napi) | 444 | ✅ |
 | `npm run test:wasm` (WASM smoke) | 10 | ✅ |
-| `npm run test:upstream:wasm` (WASM) | 444 | ⚠️ 294 pass, 150 fail |
+| `npm run test:upstream:wasm` (WASM) | 444 | ⚠️ 408 pass, 36 fail |
 
-### WASM upstream error breakdown
+### WASM upstream error breakdown (remaining 36)
 
-| Count | Error | Root cause |
-|-------|-------|-----------|
-| 21 | `!undefined` | Value expected but undefined |
-| 19 | `fillBefore` returns undefined | WASM `ContentMatch.matchFragment` implementation |
-| 17 | `null pointer passed to rust` | Mark GC/dangling across schema boundaries |
-| 15 | `array contains a value of the wrong type` | Marks from different schemas passed to WASM |
-| 11 | `expected instance of NodeType` | Dynamically-created NodeTypes not recognized |
-| 9 | `!false` assertions | Step transformation results differ from JS reference |
-| ~58 | Various assertion/behavior mismatches | WASM Rust implementation differences |
+| Count | Error | Category |
+|-------|-------|----------|
+| 7 | `!false` | Slice openStart/openEnd mismatches |
+| 3 | `RuntimeError: unreachable` | Content expression edge cases |
+| 3 | `Invalid step JSON: Unknown mark type` | Step serialization cross-schema scope |
+| 2 | `null pointer passed to rust` | Remaining Mark lifecycle edge cases |
+| 2 | `!eq doc → heading` | replaceRange node type conversion |
+| ~9 | Various `!eq` | Transform semantics (isolating, wrapping, defining context) |
+| ~10 | Other | Small API gaps (schema.spec.nodes.addBefore, Fragment.from, etc.) |
 
-Most remaining failures are in the WASM Rust implementation (mark lifecycle,
-content matching, node type checks) rather than the JS bridge layer.
-
-| Step | Task | Est. effort |
-|------|------|-------------|
-| 5.2c | Fix remaining WASM upstream test gaps (404→0) | Medium |
-| 3.2 | Compile vendored DOM `.ts` → `.js` | Medium |
-| 5.3 | Browser smoke test (Playwright) | Small |
-| 4.2 | CI updates | Medium |
-| 6.x | Publish workflow + docs | Small |
-
----
-
-## WASM upstream shim architecture
-
-### Files
+These are core Rust implementation differences from the JavaScript reference,
+not WASM binding issues.
 
 - `node/test-shim/wasm/prosemirror-model.cjs` (~400 lines) — Main bridging:
   - `BridgedSchema` — wraps raw WASM Schema with array→Fragment, marks defaults

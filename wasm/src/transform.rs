@@ -986,7 +986,7 @@ pub fn find_wrapping(
                     &JsValue::from_str(&type_name),
                 );
                 let attrs_val: JsValue =
-                    serde_wasm_bindgen::to_value(&w.attrs).unwrap_or(JsValue::NULL);
+                    crate::model::value_to_js(&w.attrs).unwrap_or(JsValue::NULL);
                 let _ = Reflect::set(&obj, &JsValue::from_str("attrs"), &attrs_val);
                 arr.push(&obj);
             }

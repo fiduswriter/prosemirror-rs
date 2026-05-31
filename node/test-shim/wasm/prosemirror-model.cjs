@@ -48,45 +48,15 @@ BridgedSchema.prototype.node = function (typeName, attrs, content, marks) {
   } else if (content == null) {
     frag = null;
   }
-  // Normalize marks — recreate from type to avoid freed WASM pointers
-  let wasmMarks = marks || [];
-  if (Array.isArray(wasmMarks)) {
-    wasmMarks = wasmMarks.map(m => {
-      if (!m) return m;
-      // Try to get type name from both napi (m.type.name) and WASM (m.type_)
-      const typeObj = m.type || m.type_;
-      if (typeObj && typeObj.name) {
-        const attrs = typeof m.attrs === 'function' ? m.attrs() : (m.attrs || null);
-        return this._wasm.mark(typeObj.name, attrs);
-      }
-      // If it's already a WASM Mark with a valid pointer, keep it
-      if (typeof m.__wbg_ptr === 'number' && m.__wbg_ptr > 0) {
-        return m;
-      }
-      return m;
-    });
-  }
-  return this._wasm.node(typeName, attrs || null, frag, wasmMarks);
+  // Bypass the OrigSchema.prototype.node patch to avoid double-cloning.
+  return origSchemaNode.call(this._wasm, typeName, attrs || null, frag, _cloneMarksForWasm(this._wasm, marks));
 };
 
 // text: marks defaults to empty array, ensure WASM Mark instances
-// text: marks defaults to empty array, recreate marks to avoid freed WASM pointers
 BridgedSchema.prototype.text = function (text, marks) {
-  if (!marks || !Array.isArray(marks)) return this._wasm.text(text, []);
-  // Always recreate marks from type info to avoid dangling WASM pointers
-  const wasmMarks = [];
-  for (const m of marks) {
-    if (!m) continue;
-    // Try to get type name from both napi (m.type.name) and WASM (m.type_)
-    const typeObj = m.type || m.type_;
-    if (typeObj && typeObj.name) {
-      const attrs = typeof m.attrs === 'function' ? m.attrs() : (m.attrs || null);
-      wasmMarks.push(this._wasm.mark(typeObj.name, attrs));
-    } else if (typeof m.__wbg_ptr === 'number' && m.__wbg_ptr > 0) {
-      wasmMarks.push(m);
-    }
-  }
-  return this._wasm.text(text, wasmMarks);
+  // Bypass the OrigSchema.prototype.text patch to avoid double-cloning.
+  // We clone here, then pass directly to the original WASM function.
+  return origSchemaText.call(this._wasm, text, _cloneMarksForWasm(this._wasm, marks));
 };
 
 // mark
@@ -130,21 +100,48 @@ OrigSchema.fromJSON = function (spec) {
   }
 })();
 
+// ---------------------------------------------------------------------------
+// Mark cloning helper — prevents WASM pointer exhaustion
+//
+// wasm-bindgen's Vec<Mark> conversion calls Mark.__unwrap() →
+// __destroy_into_raw() which sets __wbg_ptr = 0, consuming the mark.
+// To safely reuse marks across multiple calls, we clone them by
+// re-creating fresh WASM Mark instances from type.name + attrs.
+// ---------------------------------------------------------------------------
+function _cloneMarksForWasm(schemaObj, marks) {
+  if (!marks || !Array.isArray(marks)) return [];
+  if (!schemaObj) return marks.slice(); // Can't clone without schema — return copy as-is
+  const cloned = [];
+  for (const m of marks) {
+    if (!m) continue;
+    // Get type name from napi (.type.name) or WASM (.type_) patterns
+    const typeObj = m.type || m.type_;
+    if (typeObj && typeObj.name) {
+      const attrs = typeof m.attrs === 'function' ? m.attrs() : (m.attrs || null);
+      cloned.push(schemaObj.mark(typeObj.name, attrs));
+    } else if (typeof m.__wbg_ptr === 'number' && m.__wbg_ptr > 0) {
+      cloned.push(m);
+    }
+  }
+  return cloned;
+}
+
 // Patch raw WASM Schema methods
 const origSchemaText = OrigSchema.prototype.text;
-OrigSchema.prototype.text = function (text, marks) {
-  return origSchemaText.call(this, text, marks || []);
-};
 const origSchemaNode = OrigSchema.prototype.node;
+// Patch raw WASM Schema methods to clone marks (avoid pointer exhaustion)
+OrigSchema.prototype.text = function (text, marks) {
+  return origSchemaText.call(this, text, _cloneMarksForWasm(this, marks));
+};
 OrigSchema.prototype.node = function (typeName, attrs, content, marks) {
   let frag = content;
   if (Array.isArray(content)) frag = OrigFragment.fromArray(this, content);
   else if (content != null && typeof content === 'object' && content.type)
     frag = OrigFragment.fromArray(this, [content]);
-  return origSchemaNode.call(this, typeName, attrs, frag || null, marks || []);
+  return origSchemaNode.call(this, typeName, attrs, frag || null, _cloneMarksForWasm(this, marks));
 };
 
-// Patch raw WASM NodeType.create to handle arrays as content
+// Patch raw WASM NodeType.create to handle arrays as content + clone marks
 const OrigNodeType = wasm.NodeType;
 if (OrigNodeType && OrigNodeType.prototype) {
   const origCreate = OrigNodeType.prototype.create;
@@ -158,7 +155,7 @@ if (OrigNodeType && OrigNodeType.prototype) {
         const s = this.schema;
         frag = OrigFragment.fromArray(s, [content]);
       }
-      return origCreate.call(this, attrs, frag || null, marks || []);
+      return origCreate.call(this, attrs, frag || null, _cloneMarksForWasm(this.schema, marks));
     };
   }
   // Also patch createChecked and createAndFill
@@ -176,11 +173,79 @@ if (OrigNodeType && OrigNodeType.prototype) {
         } else if (content == null) {
           frag = null;
         }
-        return orig.call(this, attrs, frag, marks || []);
+        return orig.call(this, attrs, frag, _cloneMarksForWasm(this.schema, marks));
+      };
+    }
+  });
+
+  // Patch NodeType methods that take mark arrays
+  ['allowsMarks', 'allowedMarks'].forEach(method => {
+    const orig = OrigNodeType.prototype[method];
+    if (orig) {
+      OrigNodeType.prototype[method] = function (marks) {
+        return orig.call(this, _cloneMarksForWasm(this.schema, marks));
       };
     }
   });
 }
+
+// Patch Mark static methods (sameSet, setFrom)
+const OrigMark = wasm.Mark;
+if (OrigMark) {
+  const origSameSet = OrigMark.sameSet;
+  if (origSameSet) {
+    OrigMark.sameSet = function (a, b) {
+      // Need schemas from marks in a or b to clone
+      const findSchema = (arr) => {
+        for (const m of (arr || [])) {
+          const typeObj = m && (m.type || m.type_);
+          if (typeObj && typeObj.schema) return typeObj.schema;
+        }
+        return null;
+      };
+      const schema = findSchema(a) || findSchema(b);
+      return origSameSet(
+        schema ? _cloneMarksForWasm(schema, a) : a,
+        schema ? _cloneMarksForWasm(schema, b) : b
+      );
+    };
+  }
+
+  const origSetFrom = OrigMark.setFrom;
+  if (origSetFrom) {
+    OrigMark.setFrom = function (schema, marks) {
+      return origSetFrom(schema, _cloneMarksForWasm(schema, marks));
+    };
+  }
+
+  // Patch Mark instance methods that take mark arrays
+  if (OrigMark.prototype) {
+    ['addToSet', 'removeFromSet', 'isInSet'].forEach(method => {
+      const orig = OrigMark.prototype[method];
+      if (orig) {
+        OrigMark.prototype[method] = function (set) {
+          const schema = (this.type_ && this.type_.schema) || null;
+          return orig.call(this, _cloneMarksForWasm(schema, set));
+        };
+      }
+    });
+  }
+}
+
+// Patch MarkType instance methods that take mark arrays
+const OrigMarkType = wasm.MarkType;
+if (OrigMarkType && OrigMarkType.prototype) {
+  ['removeFromSet', 'isInSet'].forEach(method => {
+    const orig = OrigMarkType.prototype[method];
+    if (orig) {
+      OrigMarkType.prototype[method] = function (marks) {
+        return orig.call(this, _cloneMarksForWasm(this.schema, marks));
+      };
+    }
+  });
+}
+
+
 
 // rawSpec storage
 const schemaSpecs = new WeakMap();
@@ -357,6 +422,25 @@ const OrigNode = wasm.Node;
 if (OrigNode && OrigNode.prototype) {
   // No constructor interception needed — we handle it in the tag getter/setter
   // by checking the registry.
+
+  // Patch Node.mark() to clone marks before passing to WASM (avoid pointer exhaustion)
+  const origNodeMark = OrigNode.prototype.mark;
+  if (origNodeMark) {
+    OrigNode.prototype.mark = function (marks) {
+      const schema = (this.type_ && this.type_.schema) || null;
+      return origNodeMark.call(this, _cloneMarksForWasm(schema, marks));
+    };
+  }
+
+  // Patch Node.hasMarkup() to clone marks before passing to WASM
+  const origHasMarkup = OrigNode.prototype.hasMarkup;
+  if (origHasMarkup) {
+    OrigNode.prototype.hasMarkup = function (type_, attrs, marks) {
+      const schema = (this.type_ && this.type_.schema) || null;
+      return origHasMarkup.call(this, type_, attrs,
+        marks ? _cloneMarksForWasm(schema, marks) : marks);
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +451,16 @@ wasm.Node.fromJSON = wasm.Node.fromJson;
 // Node.prototype.toJSON for JSON.stringify support
 if (wasm.Node.prototype && wasm.Node.prototype.toJson) {
   wasm.Node.prototype.toJSON = wasm.Node.prototype.toJson;
+}
+
+// Node.prototype.type alias (WASM exports as type_, but JS expects type)
+if (wasm.Node && wasm.Node.prototype && ('type_' in wasm.Node.prototype)) {
+  Object.defineProperty(wasm.Node.prototype, 'type', Object.getOwnPropertyDescriptor(wasm.Node.prototype, 'type_'));
+}
+
+// Mark.prototype.type alias (WASM exports as type_, but JS expects type)
+if (wasm.Mark && wasm.Mark.prototype && ('type_' in wasm.Mark.prototype)) {
+  Object.defineProperty(wasm.Mark.prototype, 'type', Object.getOwnPropertyDescriptor(wasm.Mark.prototype, 'type_'));
 }
 
 // ---------------------------------------------------------------------------
@@ -548,10 +642,16 @@ if (wasm.ContentMatch && !wasm.ContentMatch.parse) {
           if (typeof val.group === 'string') {
             group = val.group;
           } else if (typeof val.spec === 'function') {
-            // NodeType has spec() method that returns a Map
+            // NodeType has spec() method that returns a Map or plain object
             const spec = val.spec();
-            if (spec && typeof spec.get === 'function') {
-              group = spec.get('group') || '';
+            if (spec) {
+              if (typeof spec.get === 'function') {
+                group = spec.get('group') || '';
+              } else if (typeof spec.group === 'string') {
+                group = spec.group;
+              } else if (spec.group) {
+                group = String(spec.group);
+              }
             }
           }
         }

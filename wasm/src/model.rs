@@ -26,9 +26,42 @@ fn js_to_value(js: &JsValue) -> Result<Value, JsValue> {
         .map_err(|e| JsValue::from_str(&format!("JSON conversion failed: {e}")))
 }
 
-fn value_to_js(value: &Value) -> Result<JsValue, JsValue> {
-    serde_wasm_bindgen::to_value(value)
-        .map_err(|e| JsValue::from_str(&format!("JSON conversion failed: {e}")))
+/// Convert a serde_json `Value` to a JavaScript value.
+/// Unlike `serde_wasm_bindgen::to_value`, this produces plain JS objects
+/// (not Maps) for JSON objects, and plain arrays for JSON arrays.
+pub(crate) fn value_to_js(value: &Value) -> Result<JsValue, JsValue> {
+    match value {
+        Value::Null => Ok(JsValue::null()),
+        Value::Bool(b) => Ok(JsValue::from_bool(*b)),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(JsValue::from_f64(i as f64))
+            } else if let Some(u) = n.as_u64() {
+                Ok(JsValue::from_f64(u as f64))
+            } else if let Some(f) = n.as_f64() {
+                Ok(JsValue::from_f64(f))
+            } else {
+                Err(JsValue::from_str(&format!("invalid number: {n}")))
+            }
+        }
+        Value::String(s) => Ok(JsValue::from_str(s)),
+        Value::Array(arr) => {
+            let js_arr = Array::new();
+            for v in arr {
+                js_arr.push(&value_to_js(v)?);
+            }
+            Ok(js_arr.into())
+        }
+        Value::Object(map) => {
+            let obj = Object::new();
+            for (k, v) in map {
+                Reflect::set(&obj, &JsValue::from_str(k), &value_to_js(v)?).map_err(|e| {
+                    JsValue::from_str(&format!("Failed to set property {k}: {e:?}"))
+                })?;
+            }
+            Ok(obj.into())
+        }
+    }
 }
 
 fn js_to_opt_str(js: &JsValue) -> Option<String> {
@@ -775,10 +808,10 @@ impl Fragment {
     #[wasm_bindgen(js_name = findDiffEnd)]
     pub fn find_diff_end(&self, other: &Fragment) -> Option<JsValue> {
         self.inner.find_diff_end(&other.inner).map(|(a, b)| {
-            let arr = Array::new();
-            arr.push(&JsValue::from_f64(a as f64));
-            arr.push(&JsValue::from_f64(b as f64));
-            arr.into()
+            let obj = Object::new();
+            Reflect::set(&obj, &JsValue::from_str("a"), &JsValue::from_f64(a as f64)).ok();
+            Reflect::set(&obj, &JsValue::from_str("b"), &JsValue::from_f64(b as f64)).ok();
+            obj.into()
         })
     }
 
