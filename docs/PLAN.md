@@ -80,11 +80,11 @@ Same limitation as above specifically for Python's `nodes_between` and
 
 ## Code-quality / deduplication
 
-### Wire Python structs through the `B*` layer
+### ~~Wire Python structs through the `B*` layer~~ ✅ Done
 
-`PyNode`, `PyNodeType`, `PyMarkType`, etc. currently hold a raw
-`DynamicNode` / `DynamicNodeType` directly rather than wrapping the
-corresponding `B*` binding struct.  Refactoring them to `PyNode { inner: BNode
-}` would eliminate duplicate method implementations and keep the two bindings
-in sync automatically.  This is a pure code-quality change — all APIs are
-already exposed.
+`PyNode`, `PyNodeType`, `PyMarkType`, `PyMark`, `PyFragment`, `PySlice`,
+`PyResolvedPos`, `PyNodeRange`, and `PyContentMatch` now all hold
+`inner: BXxx` as their only data field.  Every method body delegates to the
+corresponding `B*` method; `python/src/transform.rs` has been updated to use
+the new `x.inner.schema` / `x.inner.inner` paths throughout.  All 513 Python
+tests and 79 Node.js binding tests continue to pass.
