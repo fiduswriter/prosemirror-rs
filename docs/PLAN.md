@@ -41,6 +41,7 @@ configure their bundler to alias `prosemirror-model` → `prosemirror-rs/model`
 | 1.3  | TypeScript declarations: `model.d.ts`, `transform.d.ts` copied from upstream; `index.d.ts`, `dom.d.ts` written |
 | 1.4  | `ReplaceError` defined in `node/npm/dom.js` (JS-side) |
 | 1.5  | `contentMatchParse` already exported from native binding — re-exported via subpaths |
+| 1.6  | `Fragment.from` polymorphic wrapper (native `from` needs Node→[Node] normalization) |
 | 2.1  | WASM workspace member created (`wasm/Cargo.toml`, `wasm/src/{lib,model,transform}.rs` — placeholders) |
 | 3.1  | DOM files vendored into `vendor/` with imports rewritten to `"prosemirror-rs/model"` |
 
@@ -334,7 +335,7 @@ resolve: {
 | 1.3  | Complete `.d.ts` files                             | ✅ Done   | 1.1         |
 | 1.4  | Add `ReplaceError`                                 | ✅ Done   | 1.1         |
 | 1.5  | Add `contentMatchParse` free fn                    | ✅ Done   | 1.1         |
-| 1.6  | `Fragment.from` polymorphic                        | ⬜ Todo   | 1.1         |
+| 1.6  | `Fragment.from` polymorphic                        | ✅ Done   | 1.1         |
 | 2.1  | Create `wasm/` workspace member                    | ✅ Done   | —           |
 | 2.2  | WASM wrappers for model types                      | ⬜ Todo   | 2.1         |
 | 2.3  | WASM wrappers for transform types                  | ⬜ Todo   | 2.1         |

@@ -32,7 +32,7 @@
   ],
   "scripts": {
     "build": "cargo build --release && node copy-artifact.mjs",
-    "test": "npm run build && node --test tests/*.test.js"
+    "test": "npm run build && node --test tests/*.test.js",
     "test:upstream": "node run-upstream-tests.mjs"
   },
   "keywords": [

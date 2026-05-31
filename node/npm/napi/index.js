@@ -30,7 +30,11 @@ if (!binding) {
   binding = require("../wasm/index.js");
 }
 
-// Merge DOM types (JS-only supplement)
+// Apply JS-side patches (Fragment.from, Slice.empty, Node.toJSON, NodeType.spec)
+const patch = require("../patch");
+patch.patchStatics(binding);
+
+// Merge DOM types (ReplaceError, DOMSerializer, etc.)
 const dom = require("../dom");
 
-module.exports = { ...binding, ...dom };
+module.exports = { ...binding, ...dom, ...patch };
