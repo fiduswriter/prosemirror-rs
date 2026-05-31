@@ -65,6 +65,20 @@ impl PyStepMap {
         }
     }
 
+    /// Call `f(old_start, old_end, new_start, new_end)` for each range in this map.
+    fn for_each(&self, py: Python<'_>, f: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut entries: Vec<(usize, usize, usize, usize)> = Vec::new();
+        self.inner
+            .for_each(|old_start, old_end, new_start, new_end| {
+                entries.push((old_start, old_end, new_start, new_end));
+            });
+        for (old_start, old_end, new_start, new_end) in entries {
+            f.call1((old_start, old_end, new_start, new_end))?;
+        }
+        let _ = py;
+        Ok(())
+    }
+
     fn __richcmp__(&self, other: &Bound<'_, PyAny>, op: pyo3::basic::CompareOp) -> PyResult<bool> {
         if let Ok(other) = other.cast::<PyStepMap>() {
             let other = other.borrow();
@@ -186,6 +200,14 @@ impl PyMapping {
         PyMapping {
             inner: self.inner.clone(),
         }
+    }
+
+    fn append_mapping(&mut self, mapping: &PyMapping) {
+        self.inner.append_mapping(&mapping.inner);
+    }
+
+    fn append_mapping_inverted(&mut self, mapping: &PyMapping) {
+        self.inner.append_mapping_inverted(&mapping.inner);
     }
 
     #[getter]

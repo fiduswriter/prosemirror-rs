@@ -66,6 +66,27 @@ impl StepMap_ {
             inner: self.inner.invert(),
         }
     }
+
+    #[napi(js_name = "forEach")]
+    pub fn for_each(&self, env: Env, f: JsFunction) -> napi::Result<()> {
+        let mut entries: Vec<(usize, usize, usize, usize)> = Vec::new();
+        self.inner
+            .for_each(|old_start, old_end, new_start, new_end| {
+                entries.push((old_start, old_end, new_start, new_end));
+            });
+        for (old_start, old_end, new_start, new_end) in entries {
+            f.call(
+                None,
+                &[
+                    env.create_uint32(old_start as u32)?.into_unknown(),
+                    env.create_uint32(old_end as u32)?.into_unknown(),
+                    env.create_uint32(new_start as u32)?.into_unknown(),
+                    env.create_uint32(new_end as u32)?.into_unknown(),
+                ],
+            )?;
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -117,10 +138,14 @@ pub struct Mapping_ {
 #[napi]
 impl Mapping_ {
     #[napi(constructor)]
-    pub fn new() -> Self {
-        Mapping_ {
-            inner: Mapping::new(),
+    pub fn new(maps: Option<Vec<&StepMap_>>) -> Self {
+        let mut mapping = Mapping::new();
+        if let Some(maps) = maps {
+            for m in maps {
+                mapping.append_map(m.inner.clone(), None);
+            }
         }
+        Mapping_ { inner: mapping }
     }
 
     #[napi(getter)]
@@ -179,6 +204,16 @@ impl Mapping_ {
         Mapping_ {
             inner: self.inner.clone(),
         }
+    }
+
+    #[napi(js_name = "appendMapping")]
+    pub fn append_mapping(&mut self, mapping: &Mapping_) {
+        self.inner.append_mapping(&mapping.inner);
+    }
+
+    #[napi(js_name = "appendMappingInverted")]
+    pub fn append_mapping_inverted(&mut self, mapping: &Mapping_) {
+        self.inner.append_mapping_inverted(&mapping.inner);
     }
 }
 
