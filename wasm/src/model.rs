@@ -1272,8 +1272,17 @@ impl Node {
     }
 
     /// Cut out a slice from this node.
+    /// Note: wasm-bindgen JS wrapper strips the 3rd bool param from the JS
+    /// signature — use slice_with_parents for include_parents=true.
     pub fn slice(&self, from: usize, to: usize) -> Slice {
         let inner = self.inner.slice(from, to, false);
+        Slice { inner }
+    }
+
+    /// Cut out a slice including parent nodes.
+    #[wasm_bindgen(js_name = sliceWithParents)]
+    pub fn slice_with_parents(&self, from: usize, to: usize) -> Slice {
+        let inner = self.inner.slice(from, to, true);
         Slice { inner }
     }
 

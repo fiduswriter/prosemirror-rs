@@ -565,6 +565,15 @@ impl BFragment {
         serde_json::to_value(&self.inner).unwrap_or(Value::Null)
     }
 
+    /// Debug string representation for Fragment.
+    pub fn to_debug_string(&self) -> String {
+        let mut parts = Vec::new();
+        for child in self.inner.children() {
+            parts.push(child.to_debug_string());
+        }
+        parts.join(", ")
+    }
+
     /// Iterate children with a Rust closure.  Bindings adapt their callback type
     /// to a Rust `FnMut`.
     pub fn for_each(&self, mut f: impl FnMut(&DynamicNode, usize, usize)) {

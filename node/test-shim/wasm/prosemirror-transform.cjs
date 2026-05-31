@@ -101,8 +101,8 @@ function normalizeWrappers(wrappers) {
         const newTo = to != null ? this.mapping.map(to, 1) : newFrom;
         this.doc.nodesBetween(newFrom, newTo, function (node, pos) {
           if (node.isTextblock) {
-            const mappedPos = this.mapping.map(pos + 1, 1);
             const computedAttrs = attrs(node);
+            const mappedPos = this.mapping.map(pos + 1, 1);
             origSetBlockType.call(this, mappedPos, mappedPos, type, computedAttrs);
           }
         }.bind(this));

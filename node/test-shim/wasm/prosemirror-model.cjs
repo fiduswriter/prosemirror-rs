@@ -15,6 +15,14 @@ function BridgedSchema(spec) {
   const s = new OrigSchema(typeof spec === "string" ? spec : JSON.stringify(spec));
   this._wasm = s;
   this._rawSpec = spec;
+  // Assign schema ID and register for leafText/toDebugString lookup
+  this.__schemaId = _nextSchemaId++;
+  _specsById[this.__schemaId] = spec && spec.nodes || {};
+  // Store schema ID on the WASM schema instance for raw patch access
+  try { s.__schemaId = this.__schemaId; } catch (_) {}
+  if (spec && spec.nodes && typeof spec === 'object') {
+    _allRawSpecs.push({ nodes: spec.nodes, id: this.__schemaId });
+  }
 }
 BridgedSchema.prototype = Object.create(OrigSchema.prototype);
 
@@ -25,7 +33,19 @@ Object.defineProperty(BridgedSchema.prototype, "__wbg_ptr", {
   configurable: true,
 });
 Object.defineProperty(BridgedSchema.prototype, "nodes", {
-  get() { return this._wasm.nodes; },
+  get() {
+    const nodes = this._wasm.nodes;
+    const sid = this.__schemaId;
+    return new Proxy(nodes, {
+      get(target, prop) {
+        const val = target[prop];
+        if (val && val.__wbg_ptr != null) {
+          try { val.__schemaId = sid; } catch (_) {}
+        }
+        return val;
+      }
+    });
+  },
   configurable: true,
 });
 Object.defineProperty(BridgedSchema.prototype, "marks", {
@@ -49,14 +69,14 @@ BridgedSchema.prototype.node = function (typeName, attrs, content, marks) {
     frag = null;
   }
   // Bypass the OrigSchema.prototype.node patch to avoid double-cloning.
-  return origSchemaNode.call(this._wasm, typeName, attrs || null, frag, _cloneMarksForWasm(this._wasm, marks));
+  return _tagNode(origSchemaNode.call(this._wasm, typeName, attrs || null, frag, _cloneMarksForWasm(this._wasm, marks)), this.__schemaId);
 };
 
 // text: marks defaults to empty array, ensure WASM Mark instances
 BridgedSchema.prototype.text = function (text, marks) {
   // Bypass the OrigSchema.prototype.text patch to avoid double-cloning.
   // We clone here, then pass directly to the original WASM function.
-  return origSchemaText.call(this._wasm, text, _cloneMarksForWasm(this._wasm, marks));
+  return _tagNode(origSchemaText.call(this._wasm, text, _cloneMarksForWasm(this._wasm, marks)), this.__schemaId);
 };
 
 // mark
@@ -101,6 +121,41 @@ OrigSchema.fromJSON = function (spec) {
 })();
 
 // ---------------------------------------------------------------------------
+// Node cloning helper — prevents WASM pointer exhaustion
+//
+// wasm-bindgen's Vec<Node> conversion calls Node.__unwrap() →
+// __destroy_into_raw() which sets __wbg_ptr = 0, consuming the node.
+// To safely reuse nodes across multiple calls, we deep-clone them
+// by re-creating fresh WASM Node instances from type name + attrs + content.
+// ---------------------------------------------------------------------------
+function _cloneNode(node) {
+  if (!node || node.__wbg_ptr == null || node.__wbg_ptr === 0) return node;
+  const schema = node.type && node.type.schema;
+  if (!schema) return node;
+  const wasmSchema = schema._wasm || schema;
+  const attrs = typeof node.attrs === 'function' ? node.attrs() : node.attrs;
+  const schemaId = node.__schemaId;
+  if (node.isText) {
+    const marks = node.marks;
+    return _tagNode(origSchemaText.call(wasmSchema, node.text, marks), schemaId);
+  }
+  let frag = null;
+  if (node.content && node.content.childCount > 0) {
+    const children = [];
+    for (let i = 0; i < node.content.childCount; i++) {
+      children.push(_cloneNode(node.content.child(i)));
+    }
+    frag = origFragmentFromArray(wasmSchema, children);
+  }
+  return _tagNode(origSchemaNode.call(wasmSchema, node.type.name, attrs, frag, node.marks), schemaId);
+}
+
+function _cloneNodes(nodes) {
+  if (!nodes || !Array.isArray(nodes)) return nodes;
+  return nodes.map(n => _cloneNode(n));
+}
+
+// ---------------------------------------------------------------------------
 // Mark cloning helper — prevents WASM pointer exhaustion
 //
 // wasm-bindgen's Vec<Mark> conversion calls Mark.__unwrap() →
@@ -131,14 +186,14 @@ const origSchemaText = OrigSchema.prototype.text;
 const origSchemaNode = OrigSchema.prototype.node;
 // Patch raw WASM Schema methods to clone marks (avoid pointer exhaustion)
 OrigSchema.prototype.text = function (text, marks) {
-  return origSchemaText.call(this, text, _cloneMarksForWasm(this, marks));
+  return _tagNode(origSchemaText.call(this, text, _cloneMarksForWasm(this, marks)), this.__schemaId);
 };
 OrigSchema.prototype.node = function (typeName, attrs, content, marks) {
   let frag = content;
-  if (Array.isArray(content)) frag = OrigFragment.fromArray(this, content);
+  if (Array.isArray(content)) frag = OrigFragment.fromArray(this, _cloneNodes(content));
   else if (content != null && typeof content === 'object' && content.type)
-    frag = OrigFragment.fromArray(this, [content]);
-  return origSchemaNode.call(this, typeName, attrs, frag || null, _cloneMarksForWasm(this, marks));
+    frag = OrigFragment.fromArray(this, [_cloneNode(content)]);
+  return _tagNode(origSchemaNode.call(this, typeName, attrs, frag || null, _cloneMarksForWasm(this, marks)), this.__schemaId);
 };
 
 // Patch raw WASM NodeType.create to handle arrays as content + clone marks
@@ -150,12 +205,12 @@ if (OrigNodeType && OrigNodeType.prototype) {
       let frag = content;
       if (Array.isArray(content)) {
         const s = this.schema;
-        frag = OrigFragment.fromArray(s, content);
+        frag = OrigFragment.fromArray(s, _cloneNodes(content));
       } else if (content != null && typeof content === 'object' && content.type) {
         const s = this.schema;
-        frag = OrigFragment.fromArray(s, [content]);
+        frag = OrigFragment.fromArray(s, [_cloneNode(content)]);
       }
-      return origCreate.call(this, attrs, frag || null, _cloneMarksForWasm(this.schema, marks));
+      return _tagNode(origCreate.call(this, attrs, frag || null, _cloneMarksForWasm(this.schema, marks)), this.__schemaId);
     };
   }
   // Also patch createChecked and createAndFill
@@ -166,14 +221,14 @@ if (OrigNodeType && OrigNodeType.prototype) {
         let frag = content;
         if (Array.isArray(content)) {
           const s = this.schema;
-          frag = OrigFragment.fromArray(s, content);
+          frag = OrigFragment.fromArray(s, _cloneNodes(content));
         } else if (content != null && typeof content === 'object' && content.type) {
           const s = this.schema;
-          frag = OrigFragment.fromArray(s, [content]);
+          frag = OrigFragment.fromArray(s, [_cloneNode(content)]);
         } else if (content == null) {
           frag = null;
         }
-        return orig.call(this, attrs, frag, _cloneMarksForWasm(this.schema, marks));
+        return _tagNode(orig.call(this, attrs, frag, _cloneMarksForWasm(this.schema, marks)), this.__schemaId);
       };
     }
   });
@@ -247,14 +302,28 @@ if (OrigMarkType && OrigMarkType.prototype) {
 
 
 
-// rawSpec storage
+// rawSpec storage — global registry indexed by node type name,
+// since WASM schema wrappers are not stable across property accesses.
+let _nextSchemaId = 1;
+const _specsById = {};
+const _allRawSpecs = [];
 const schemaSpecs = new WeakMap();
+
+function _tagNode(node, schemaId) {
+  if (node && node.__wbg_ptr != null && node.__wbg_ptr !== 0) {
+    try { node.__schemaId = schemaId; } catch (_) { Object.defineProperty(node, '__schemaId', { value: schemaId }); }
+  }
+  return node;
+}
 BridgedSchema.prototype.__getRawSpec = function () {
   return this._rawSpec || schemaSpecs.get(this._wasm);
 };
 BridgedSchema.prototype.__setRawSpec = function (spec) {
   this._rawSpec = spec;
   schemaSpecs.set(this._wasm, spec);
+  if (spec && spec.nodes) {
+    _allRawSpecs.push({ nodes: spec.nodes });
+  }
 };
 
 // .spec getter for upstream test compat (OrderedMap-like interface)
@@ -265,12 +334,50 @@ Object.defineProperty(BridgedSchema.prototype, "spec", {
     const marks = Object.assign({}, raw.marks || {});
 
     function makeNodes(base) {
-      return {
-        get(name) { return base[name]; },
-        update(name, value) {
+          return {
+            get(name) { return base[name]; },
+            update(name, value) {
+              const updated = Object.assign({}, base);
+              updated[name] = value;
+              return makeNodes(updated);
+            },
+            addBefore(place, key, value) {
+                      const updated = Object.assign({}, base);
+                      // Insert before the given key by rebuilding from keys
+                      const entries = [];
+                      for (const k of Object.keys(updated)) {
+                        if (k === place) entries.push([key, value]);
+                        entries.push([k, updated[k]]);
+                      }
+                      if (!updated[place]) entries.push([key, value]);
+                      // Rebuild base
+                      const result = {};
+                      for (const [k, v] of entries) result[k] = v;
+                      return makeNodes(result);
+                    },
+                    addAfter(place, key, value) {
+                      const updated = Object.assign({}, base);
+                      const entries = [];
+                      for (const k of Object.keys(updated)) {
+                        entries.push([k, updated[k]]);
+                        if (k === place) entries.push([key, value]);
+                      }
+                      if (!updated[place]) entries.push([key, value]);
+                      const result = {};
+                      for (const [k, v] of entries) result[k] = v;
+                      return makeNodes(result);
+                    },
+                    addToEnd(name, value) {
           const updated = Object.assign({}, base);
           updated[name] = value;
           return makeNodes(updated);
+        },
+        addToStart(name, value) {
+          const updated = Object.assign({}, base);
+          const result = {};
+          result[name] = value;
+          Object.assign(result, updated);
+          return makeNodes(result);
         },
         forEach(fn) { Object.keys(base).forEach(k => fn(k, base[k])); },
         append(map) {
@@ -293,6 +400,42 @@ Object.defineProperty(BridgedSchema.prototype, "spec", {
           const updated = Object.assign({}, base);
           updated[name] = value;
           return makeMarks(updated);
+        },
+        addBefore(place, key, value) {
+          const updated = Object.assign({}, base);
+          const entries = [];
+          for (const k of Object.keys(updated)) {
+            if (k === place) entries.push([key, value]);
+            entries.push([k, updated[k]]);
+          }
+          if (!updated[place]) entries.push([key, value]);
+          const result = {};
+          for (const [k, v] of entries) result[k] = v;
+          return makeMarks(result);
+        },
+        addAfter(place, key, value) {
+                      const updated = Object.assign({}, base);
+                      const entries = [];
+                      for (const k of Object.keys(updated)) {
+                        entries.push([k, updated[k]]);
+                        if (k === place) entries.push([key, value]);
+                      }
+                      if (!updated[place]) entries.push([key, value]);
+          const result = {};
+          for (const [k, v] of entries) result[k] = v;
+          return makeMarks(result);
+        },
+        addToEnd(name, value) {
+          const updated = Object.assign({}, base);
+          updated[name] = value;
+          return makeMarks(updated);
+        },
+        addToStart(name, value) {
+          const updated = Object.assign({}, base);
+          const result = {};
+          result[name] = value;
+          Object.assign(result, updated);
+          return makeMarks(result);
         },
         forEach(fn) { Object.keys(base).forEach(k => fn(k, base[k])); },
         append(map) {
@@ -338,10 +481,10 @@ OrigFragment.from = function (input, schema) {
   // Case 2: array of nodes (including empty array)
   if (Array.isArray(input)) {
     const s = schema || (OrigFragment._lastSchema);
-    if (s) return origFragmentFromArray(s, input);
+    if (s) return origFragmentFromArray(s, _cloneNodes(input));
     // Fallback: extract schema from first node
     if (input.length > 0 && input[0] && input[0].type && input[0].type.schema) {
-      return origFragmentFromArray(input[0].type.schema, input);
+      return origFragmentFromArray(input[0].type.schema, _cloneNodes(input));
     }
     // Empty array with no schema — need a fallback
     if (input.length === 0 && OrigFragment._lastSchema) {
@@ -352,7 +495,7 @@ OrigFragment.from = function (input, schema) {
   if (input && typeof input === 'object' && input.type && input.type.schema) {
     // Store schema for later use
     OrigFragment._lastSchema = input.type.schema;
-    return origFragmentFromArray(input.type.schema, [input]);
+    return origFragmentFromArray(input.type.schema, [_cloneNode(input)]);
   }
   // Case 4: Schema → empty fragment
   // Store schema for later use
@@ -362,10 +505,31 @@ OrigFragment.from = function (input, schema) {
   return origFragmentFrom(input);
 };
 OrigFragment.fromArray = function (schema, nodes) {
-  // Direct passthrough to WASM Fragment.fromArray(schema, nodes)
-  return origFragmentFromArray(schema, nodes);
+  // If called with only nodes (no schema), extract schema from first node
+  if (nodes === undefined && Array.isArray(schema)) {
+    const arr = schema;
+    if (arr.length > 0 && arr[0] && arr[0].type && arr[0].type.schema) {
+      return origFragmentFromArray(arr[0].type.schema, _cloneNodes(arr));
+    }
+    if (OrigFragment._lastSchema) {
+      return origFragmentFromArray(OrigFragment._lastSchema, _cloneNodes(arr));
+    }
+  }
+   // Direct passthrough to WASM Fragment.fromArray(schema, nodes)
+   return origFragmentFromArray(schema, Array.isArray(nodes) ? _cloneNodes(nodes) : nodes);
 };
 OrigFragment._wasmBridged = true;
+
+// Fragment.prototype.toString — override Object default
+if (OrigFragment.prototype) {
+  OrigFragment.prototype.toString = function () {
+    const parts = [];
+    for (let i = 0; i < this.childCount; i++) {
+      parts.push(this.child(i).toString());
+    }
+    return '<' + parts.join(', ') + '>';
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Tag preservation — WASM Node objects lose JS properties when copied.
@@ -453,9 +617,183 @@ if (wasm.Node.prototype && wasm.Node.prototype.toJson) {
   wasm.Node.prototype.toJSON = wasm.Node.prototype.toJson;
 }
 
+// Patch Node.slice and Node.cut to handle undefined `to` parameter.
+// The JS tests pass `doc.tag.b` which may be undefined (meaning "to end").
+// WASM doesn't support optional numeric params like napi does.
+if (wasm.Node && wasm.Node.prototype) {
+  const origSlice = wasm.Node.prototype.slice;
+  if (origSlice) {
+    wasm.Node.prototype.slice = function (from, to, includeParents) {
+      if (to === undefined) to = this.content.size;
+      if (includeParents) {
+        // Include parent nodes: resolve at depth 0, compute content and opens.
+        // We use the underlying Rust slice() and then adjust openStart/openEnd.
+        // Get content by cutting the root level manually.
+        const rpFrom = this.resolve(from);
+        const rpTo = this.resolve(to);
+        const openStart = rpFrom.depth;
+        const openEnd = rpTo.depth;
+        // Get content at depth 0
+        const rootNode = rpFrom.node(0);
+        const startInRoot = rpFrom.pos - rpFrom.start(0);
+        const endInRoot = rpTo.pos - rpTo.start(0);
+        const contentFragment = rootNode.content.cut(startInRoot, endInRoot);
+        return new wasm.Slice(contentFragment, openStart, openEnd);
+      }
+      return origSlice.call(this, from, to);
+    };
+  }
+  const origCut = wasm.Node.prototype.cut;
+  if (origCut) {
+    wasm.Node.prototype.cut = function (from, to) {
+      if (to === undefined) to = this.content.size;
+      return origCut.call(this, from, to);
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Node.textBetween / Fragment.textBetween — JS-side override to support
+// leafText functions and correct block separator behavior.
+// The WASM native versions only handle string leafText.
+// ---------------------------------------------------------------------------
+function _getNodeSpecCallback(node, key) {
+  if (!node || !node.type) return undefined;
+  const name = node.type.name;
+  // Try node-tagged schema ID first (most reliable)
+  if (node.__schemaId) {
+    const nodes = _specsById[node.__schemaId];
+    return (nodes && nodes[name] && nodes[name][key]) || undefined;
+  }
+  // Fall back to global search (for nodes without schema ID)
+  // Only use if exactly one schema defines this callback
+  let result = undefined;
+  let count = 0;
+  for (const spec of _allRawSpecs) {
+    if (spec.nodes && spec.nodes[name] && spec.nodes[name][key]) {
+      result = spec.nodes[name][key];
+      count++;
+    }
+  }
+  return count === 1 ? result : undefined;
+}
+
+function _getLeafText(node) {
+  const fn = _getNodeSpecCallback(node, 'leafText');
+  if (typeof fn === 'function') {
+    try { return fn(node); } catch (_) { return ''; }
+  }
+  return '';
+}
+
+if (wasm.Node && wasm.Node.prototype) {
+  const origNodesBetween = wasm.Node.prototype.nodesBetween;
+  if (origNodesBetween) {
+    wasm.Node.prototype.textBetween = function (from, to, blockSeparator, leafText) {
+      let text = '', first = true;
+      origNodesBetween.call(this, from, to, (node, pos) => {
+        let nodeText = node.isText
+          ? node.text.slice(Math.max(from, pos) - pos, to - pos)
+          : !node.isLeaf
+            ? ''
+            : leafText
+              ? typeof leafText === 'function'
+                ? leafText(node)
+                : leafText
+              : _getLeafText(node);
+        if (node.isBlock && ((node.isLeaf && nodeText) || node.isTextblock) && blockSeparator) {
+          if (first) first = false;
+          else text += blockSeparator;
+        }
+        text += nodeText;
+      });
+      return text;
+    };
+  }
+}
+
+if (wasm.Fragment && wasm.Fragment.prototype) {
+  const origFragNodesBetween = wasm.Fragment.prototype.nodesBetween;
+  if (origFragNodesBetween) {
+    wasm.Fragment.prototype.textBetween = function (from, to, blockSeparator, leafText) {
+      let text = '', first = true;
+      origFragNodesBetween.call(this, from, to, (node, pos) => {
+        let nodeText = node.isText
+          ? node.text.slice(Math.max(from, pos) - pos, to - pos)
+          : !node.isLeaf
+            ? ''
+            : leafText
+              ? typeof leafText === 'function'
+                ? leafText(node)
+                : leafText
+              : _getLeafText(node);
+        if (node.isBlock && ((node.isLeaf && nodeText) || node.isTextblock) && blockSeparator) {
+          if (first) first = false;
+          else text += blockSeparator;
+        }
+        text += nodeText;
+      });
+      return text;
+    };
+  }
+}
+
+// Patch Node.prototype.toString to support toDebugString from NodeSpec
+if (wasm.Node && wasm.Node.prototype) {
+  const origToString = wasm.Node.prototype.toString;
+  if (origToString) {
+    wasm.Node.prototype.toString = function () {
+      const toDebugString = _getNodeSpecCallback(this, 'toDebugString');
+      if (typeof toDebugString === 'function') {
+        try { return toDebugString(this); } catch (_) {}
+      }
+      return origToString.call(this);
+    };
+  }
+}
+
+// Patch Node.prototype.textContent to support leafText from NodeSpec
+if (wasm.Node && wasm.Node.prototype) {
+  const textContentDesc = Object.getOwnPropertyDescriptor(wasm.Node.prototype, 'textContent');
+  if (textContentDesc && textContentDesc.get) {
+    const origTextContent = textContentDesc.get;
+    Object.defineProperty(wasm.Node.prototype, 'textContent', {
+      get: function () {
+        if (this.isLeaf) {
+          const lt = _getLeafText(this);
+          if (lt) return lt;
+          return origTextContent.call(this);
+        }
+        if (this.isText) return this.text;
+        // Non-leaf, non-text: recursively collect text from children
+        let text = '';
+        if (this.content) {
+          for (let i = 0; i < this.content.childCount; i++) {
+            text += this.content.child(i).textContent;
+          }
+        }
+        return text;
+      },
+      configurable: true,
+    });
+  }
+}
+
 // Node.prototype.type alias (WASM exports as type_, but JS expects type)
 if (wasm.Node && wasm.Node.prototype && ('type_' in wasm.Node.prototype)) {
   Object.defineProperty(wasm.Node.prototype, 'type', Object.getOwnPropertyDescriptor(wasm.Node.prototype, 'type_'));
+}
+
+// Node.prototype.attrs getter (WASM exports attrs as a function; tests access it as a property)
+if (wasm.Node && wasm.Node.prototype) {
+  const attrsDesc = Object.getOwnPropertyDescriptor(wasm.Node.prototype, 'attrs');
+  if (attrsDesc && typeof attrsDesc.value === 'function') {
+    const origAttrsFn = attrsDesc.value;
+    Object.defineProperty(wasm.Node.prototype, 'attrs', {
+      get: function() { return origAttrsFn.call(this); },
+      configurable: true,
+    });
+  }
 }
 
 // Mark.prototype.type alias (WASM exports as type_, but JS expects type)
@@ -477,6 +815,21 @@ if (wasm.ResolvedPos && wasm.ResolvedPos.prototype) {
       value: function () { return marksDesc.get.call(this); },
       configurable: true,
       writable: true,
+    });
+  }
+  // nodeBefore / nodeAfter: WASM has them as methods, but tests access them as properties
+  if (typeof wasm.ResolvedPos.prototype.nodeBefore === 'function') {
+    const origNodeBefore = wasm.ResolvedPos.prototype.nodeBefore;
+    Object.defineProperty(wasm.ResolvedPos.prototype, 'nodeBefore', {
+      get: function () { return origNodeBefore.call(this); },
+      configurable: true,
+    });
+  }
+  if (typeof wasm.ResolvedPos.prototype.nodeAfter === 'function') {
+    const origNodeAfter = wasm.ResolvedPos.prototype.nodeAfter;
+    Object.defineProperty(wasm.ResolvedPos.prototype, 'nodeAfter', {
+      get: function () { return origNodeAfter.call(this); },
+      configurable: true,
     });
   }
   // All other methods are now natively camelCase via WASM js_name
@@ -571,6 +924,21 @@ if (wasm.Slice && wasm.Slice.prototype) {
       Object.defineProperty(wasm.Slice.prototype, 'toJSON', desc);
     }
   }
+  // Slice.toString: build debug string from content and openStart/openEnd.
+  // WASM binding exports toDebugString on Node, so we use that.
+  wasm.Slice.prototype.toString = function () {
+    const os = this.openStart || 0;
+    const oe = this.openEnd || 0;
+    const content = this.content;
+    let contentStr = '';
+    // Build content string by iterating children
+    const parts = [];
+    for (let i = 0; i < content.childCount; i++) {
+      parts.push(content.child(i).toString());
+    }
+    contentStr = parts.join(', ');
+    return '<' + contentStr + '>(' + os + ',' + oe + ')';
+  };
 }
 
 // Slice.empty static — creates an empty slice.
