@@ -9,6 +9,10 @@ node/npm/napi/*.node
 node/npm/wasm/*.wasm
 node/npm/wasm/prosemirror_rs_wasm.js
 node/npm/wasm/prosemirror_rs_wasm_bg.js
+node/npm/wasm/prosemirror_rs_wasm.d.ts
+node/npm/wasm/prosemirror_rs_wasm_bg.wasm.d.ts
+node/npm/wasm/package.json
+node/npm/wasm/.gitignore
 node/.upstream-tests/
 __pycache__/
 *.pyc

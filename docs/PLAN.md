@@ -43,6 +43,7 @@ configure their bundler to alias `prosemirror-model` → `prosemirror-rs/model`
 | 1.5  | `contentMatchParse` already exported from native binding — re-exported via subpaths |
 | 1.6  | `Fragment.from` polymorphic wrapper (native `from` needs Node→[Node] normalization) |
 | 2.1  | WASM workspace member created (`wasm/Cargo.toml`, `wasm/src/{lib,model,transform}.rs` — placeholders) |
+| 2.2  | WASM model wrappers (`wasm/src/model.rs`, ~1150 lines) |
 | 3.1  | DOM files vendored into `vendor/` with imports rewritten to `"prosemirror-rs/model"` |
 
 ### Remaining
@@ -337,9 +338,9 @@ resolve: {
 | 1.5  | Add `contentMatchParse` free fn                    | ✅ Done   | 1.1         |
 | 1.6  | `Fragment.from` polymorphic                        | ✅ Done   | 1.1         |
 | 2.1  | Create `wasm/` workspace member                    | ✅ Done   | —           |
-| 2.2  | WASM wrappers for model types                      | ⬜ Todo   | 2.1         |
-| 2.3  | WASM wrappers for transform types                  | ⬜ Todo   | 2.1         |
-| 2.4  | Build pipeline + `wasm-pack` integration           | ⬜ Todo   | 2.2, 2.3    |
+| 2.2  | WASM wrappers for model types                      | ✅ Done   | 2.1         |
+| 2.3  | WASM wrappers for transform types                  | ✅ Done   | 2.1         |
+| 2.4  | Build pipeline + `wasm-pack` integration           | ✅ Done   | 2.2, 2.3    |
 | 3.1  | Vendor DOM files from upstream                     | ✅ Done   | —           |
 | 3.2  | Rewrite imports, build CJS + ESM versions          | ⬜ Todo   | 3.1         |
 | 4.1  | Integrate WASM + vendor into package build         | ⬜ Todo   | 2.4, 3.2    |

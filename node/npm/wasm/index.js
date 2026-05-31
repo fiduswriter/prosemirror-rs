@@ -1,10 +1,27 @@
 // WASM back-end for prosemirror-rs.
-// This file is a placeholder.  After `wasm-pack build`, the real
-// prosemirror_rs_wasm.js and prosemirror_rs_wasm_bg.wasm are placed
-// in this directory and this file is replaced.
+// Re-exports everything from the wasm-pack generated module.
+// Used as the browser/bundler entry point via the package.json exports map.
 
-throw new Error(
-  "prosemirror-rs WASM back-end is not yet built. " +
-  "Run `wasm-pack build` from the wasm/ directory, or use the napi " +
-  "back-end on a supported Node.js platform."
-);
+import * as wasm from "./prosemirror_rs_wasm.js";
+
+// Apply JS-side patches (Fragment.from, Slice.empty, etc.)
+// These are shared with the napi back-end.
+import { patchStatics } from "../patch.js";
+patchStatics(wasm);
+
+// Merge DOM types
+import * as dom from "../dom.js";
+
+export const {
+  Schema, Node, NodeType, Fragment, Slice, ResolvedPos, NodeRange,
+  Mark, MarkType, ContentMatch,
+  StepMap, MapResult, Mapping, Step, Transform,
+  liftTarget, findWrapping, canSplit, canJoin,
+  joinPoint, insertPoint, dropPoint,
+  contentMatchParse,
+} = wasm;
+
+export const { ReplaceError } = dom;
+
+// Re-export remaining DOM+patch symbols
+export { setRawSpec, getRawSpec } from "../patch.js";

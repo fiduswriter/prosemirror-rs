@@ -25,9 +25,11 @@ if (filename) {
   }
 }
 
-// Fall back to WASM if no prebuilt .node binary is available
 if (!binding) {
-  binding = require("../wasm/index.js");
+  throw new Error(
+    `prosemirror-rs: unsupported platform ${key}. ` +
+    "Use the ESM entry point (works with bundlers) or install on a supported platform."
+  );
 }
 
 // Apply JS-side patches (Fragment.from, Slice.empty, Node.toJSON, NodeType.spec)
