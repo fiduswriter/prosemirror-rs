@@ -33,7 +33,10 @@
   "scripts": {
     "build": "cargo build --release && node copy-artifact.mjs",
     "test": "npm run build && node --test tests/*.test.js",
-    "test:upstream": "node run-upstream-tests.mjs"
+    "build:wasm": "cd ../wasm && wasm-pack build --target web --out-dir ../node/npm/wasm && wasm-pack build --target nodejs --out-dir ../node/npm/wasm-nodejs",
+    "test:wasm": "npm run build:wasm && node --test tests/wasm-smoke.test.cjs",
+    "test:upstream": "node run-upstream-tests.mjs",
+    "test:all": "npm test && npm run test:upstream && npm run test:wasm"
   },
   "keywords": [
     "prosemirror",

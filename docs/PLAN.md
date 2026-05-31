@@ -8,7 +8,6 @@ Deliver a **single npm package** — `prosemirror-rs` — that serves as a
 automatically based on the runtime environment:
 
 - **Node.js** → napi-rs native addon (fastest path)
-- **Node.js** (unsupported platform, no prebuilt binary) → WASM fallback
 - **Browser / bundler / Deno / Cloudflare Workers** → WASM
 
 The package auto-detects the environment — consumers just `npm install
@@ -24,47 +23,65 @@ import { Transform, Step } from "prosemirror-rs/transform";
 import { Editor } from "prosemirror-rs";
 ```
 
-For true drop-in replacement without changing a single import, consumers
-configure their bundler to alias `prosemirror-model` → `prosemirror-rs/model`
-(see Step 6).
-
 ---
 
-## Status overview
+## Status
 
-### Done
+### ✅ Done (Steps 1–2, partial 3–5)
 
-| Step | Task                                                  |
-|------|-------------------------------------------------------|
-| 1.1  | npm package restructured under `node/npm/` with subpath exports |
-| 1.2  | Conditional exports + auto-dispatch: `package.json` `exports` map with `node`/`browser`/`default` conditions |
-| 1.3  | TypeScript declarations: `model.d.ts`, `transform.d.ts` copied from upstream; `index.d.ts`, `dom.d.ts` written |
-| 1.4  | `ReplaceError` defined in `node/npm/dom.js` (JS-side) |
-| 1.5  | `contentMatchParse` already exported from native binding — re-exported via subpaths |
-| 1.6  | `Fragment.from` polymorphic wrapper (native `from` needs Node→[Node] normalization) |
-| 2.1  | WASM workspace member created (`wasm/Cargo.toml`, `wasm/src/{lib,model,transform}.rs` — placeholders) |
-| 2.2  | WASM model wrappers (`wasm/src/model.rs`, ~1150 lines) |
-| 3.1  | DOM files vendored into `vendor/` with imports rewritten to `"prosemirror-rs/model"` |
+| Step | Task |
+|------|------|
+| 1.1 | npm package under `node/npm/` with subpath exports |
+| 1.2 | Conditional exports + auto-dispatch (node/browser/default) |
+| 1.3 | TypeScript declarations (model, transform, dom, index) |
+| 1.4 | `ReplaceError` in `node/npm/dom.js` |
+| 1.5 | `contentMatchParse` re-exported |
+| 1.6 | `Fragment.from` polymorphic wrapper in `node/npm/patch.js` |
+| 2.1 | `wasm/` workspace member |
+| 2.2 | WASM model wrappers (`wasm/src/model.rs`, ~1150 lines) |
+| 2.3 | WASM transform wrappers (`wasm/src/transform.rs`, ~1120 lines) |
+| 2.4 | `wasm-pack build` integrated |
+| 3.1 | DOM files vendored into `vendor/` |
+| 5.1a | napi unit tests (97 pass) |
+| 5.1b | napi upstream tests (444 pass) |
+| 5.2a | WASM smoke test (10 pass) |
 
-### Remaining
+### Test results summary
 
-| Step | Task                                                  | Est. effort |
-|------|-------------------------------------------------------|-------------|
-| 1.6  | `Fragment.from` polymorphic overload                  | Small       |
-| 2.2  | WASM wrappers for model types (`#[wasm_bindgen]` on all `B*` types) | Large |
-| 2.3  | WASM wrappers for transform types                     | Large       |
-| 2.4  | `wasm-pack build` integration into build pipeline     | Small       |
-| 3.2  | Compile vendored DOM `.ts` to `.js` (CJS + ESM)       | Medium      |
-| 4.1  | Integrate WASM output + compiled DOM into `node/npm/` | Small       |
-| 4.2  | CI updates (build WASM, run tests, publish)           | Medium      |
-| 5.1  | Validate upstream tests against the restructured package | Small    |
-| 5.2  | Run upstream tests against WASM back-end              | Medium      |
-| 5.3  | Browser smoke test (Playwright)                       | Small       |
-| 6.x  | Publish workflow + README docs                        | Small       |
+| Suite | Tests | Status |
+|-------|-------|--------|
+| `npm test` (napi unit) | 97 | ✅ All pass |
+| `npm run test:upstream` (napi) | 444 | ✅ All pass |
+| `npm run test:wasm` (WASM smoke) | 10 | ✅ All pass |
+| `npm run test:upstream:wasm` (WASM) | 444 | ⚠️ Infrastructure ready, ~1 test file with API gaps |
 
----
+| Step | Task | Est. effort |
+|------|------|-------------|
+| 3.2 | Compile vendored DOM `.ts` → `.js` | Medium |
+| 5.2b | Fix remaining WASM upstream test API gaps (Schema.spec, node type resolution) | Medium |
+| 5.3 | Browser smoke test (Playwright) | Small |
+| 4.2 | CI updates | Medium |
+| 6.x | Publish workflow + docs | Small |
 
-## Step 1 — Restructure the npm package with subpath exports ✅ (done)
+## WASM upstream test status
+
+### Infrastructure: ✅ Complete
+- `node run-upstream-tests.mjs --wasm` builds temp dir, rewrites imports for WASM shims
+- `node/test-shim/wasm/prosemirror-model.cjs` — Bridgeschema + raw WASM patches
+- `node/test-shim/wasm/prosemirror-transform.cjs` — Step/Transform/Mapping shims
+
+### API bridges implemented:
+- `Schema.node` / `Schema.text` — array→Fragment, marks default to `[]`
+- `NodeType.create` — array content → Fragment
+- `Schema.spec.nodes.get/update/forEach` — OrderedMap compat
+- `Fragment.from_array` / `Fragment.from` — schema-first factory
+- CamelCase aliases for snake_case methods (Mark.addToSet, ContentMatch.matchType, etc.)
+- `Node.fromJSON` / `Node.prototype.toJSON`
+
+### Remaining gaps:
+- Some upstream tests use internal Schema APIs (`spec.nodes.update`, `schema.cached`)
+- Node type resolution issues in certain test schemas
+- `Slice.empty` and other static getters need WASM-specific bridging
 
 ### 1.1 Package layout
 

@@ -2,8 +2,9 @@
 /**
  * Run upstream ProseMirror JS tests against the Rust implementation.
  *
- * Copies the upstream compiled .js test files, replaces their imports
- * to point at our test shims, and runs them with Mocha.
+ * Usage:
+ *   node run-upstream-tests.mjs          # napi back-end (default)
+ *   node run-upstream-tests.mjs --wasm   # WASM back-end
  */
 import {
   readFileSync,
@@ -15,7 +16,9 @@ import {
 } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { spawnSync } from "child_process";
+import { spawnSync, execSync } from "child_process";
+
+const USE_WASM = process.argv.includes("--wasm");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -26,11 +29,16 @@ const UPSTREAM_DIRS = ["tests/upstream"];
 const EXCLUDE_FILES = new Set(["test-dom.js", "test-dom.ts"]);
 
 // Import replacements
+const SHIM_DIR = USE_WASM ? "test-shim/wasm" : "test-shim";
+const NODE_PATH = USE_WASM
+  ? "npm/wasm-nodejs/prosemirror_rs_wasm.js"
+  : "npm/napi/prosemirror-rs.linux-x64-gnu.node";
+
 const IMPORT_REPLACEMENTS = [
-  { from: "prosemirror-model", to: "./test-shim/prosemirror-model.cjs" },
+  { from: "prosemirror-model", to: `./${SHIM_DIR}/prosemirror-model.cjs` },
   {
     from: "prosemirror-transform",
-    to: "./test-shim/prosemirror-transform.cjs",
+    to: `./${SHIM_DIR}/prosemirror-transform.cjs`,
   },
   {
     from: "prosemirror-test-builder",
@@ -57,19 +65,64 @@ function clean() {
   const destShimDir = join(TEMP_DIR, "test-shim");
   mkdirSync(destShimDir, { recursive: true });
   for (const file of readdirSync(shimDir)) {
-    let content = readFileSync(join(shimDir, file), "utf-8");
-    // Rewrite the require path for the native binary
+    const srcPath = join(shimDir, file);
+    if (!existsSync(srcPath) || !srcPath.endsWith(".cjs")) continue;
+    let content = readFileSync(srcPath, "utf-8");
     content = content.replace(
       /require\(['"]\.\.\/npm\/napi\/prosemirror-rs\.linux-x64-gnu\.node['"]\)/g,
       'require("./prosemirror-rs.linux-x64-gnu.node")',
     );
+    // For WASM mode, redirect the test-builder's prosemirror-model require
+    if (USE_WASM && file === "prosemirror-test-builder.cjs") {
+      content = content.replace(
+        /require\(['"]prosemirror-model['"]\)/g,
+        'require("./wasm/prosemirror-model.cjs")',
+      );
+      content = content.replace(
+        /require\(['"]\.\/prosemirror-model\.cjs['"]\)/g,
+        'require("./wasm/prosemirror-model.cjs")',
+      );
+    }
     writeFileSync(join(destShimDir, file), content, "utf-8");
   }
-  // Copy native binary to temp dir root and shim dir
-  const binaryName = "prosemirror-rs.linux-x64-gnu.node";
-  const binaryData = readFileSync(join(__dirname, "npm", "napi", binaryName));
-  writeFileSync(join(TEMP_DIR, binaryName), binaryData);
-  writeFileSync(join(destShimDir, binaryName), binaryData);
+
+  // Copy WASM shim files if they exist (no path rewriting needed)
+  const wasmShimDir = join(__dirname, "test-shim", "wasm");
+  if (existsSync(wasmShimDir)) {
+    const destWasmShimDir = join(TEMP_DIR, "test-shim", "wasm");
+    mkdirSync(destWasmShimDir, { recursive: true });
+    for (const file of readdirSync(wasmShimDir)) {
+      writeFileSync(
+        join(destWasmShimDir, file),
+        readFileSync(join(wasmShimDir, file)),
+      );
+    }
+  }
+
+  // Copy native binary or WASM files to temp dir
+  if (USE_WASM) {
+    // Copy entire wasm-nodejs directory
+    const wasmNodeDir = join(__dirname, "npm", "wasm-nodejs");
+    const destWasmDir = join(TEMP_DIR, "npm", "wasm-nodejs");
+    mkdirSync(destWasmDir, { recursive: true });
+    for (const file of readdirSync(wasmNodeDir)) {
+      const src = join(wasmNodeDir, file);
+      if (!existsSync(src) || src.endsWith("/")) continue;
+      try {
+        writeFileSync(join(destWasmDir, file), readFileSync(src));
+      } catch (_) { /* skip dirs */ }
+    }
+    // Also copy patch.js and dom.js
+    const npmDir = join(__dirname, "npm");
+    for (const f of ["patch.js", "dom.js"]) {
+      writeFileSync(join(TEMP_DIR, "npm", f), readFileSync(join(npmDir, f)));
+    }
+  } else {
+    const binaryName = "prosemirror-rs.linux-x64-gnu.node";
+    const binaryData = readFileSync(join(__dirname, "npm", "napi", binaryName));
+    writeFileSync(join(TEMP_DIR, binaryName), binaryData);
+    writeFileSync(join(destShimDir, binaryName), binaryData);
+  }
 }
 
 function copyAndRewrite(srcDir, file) {
@@ -206,8 +259,11 @@ function main() {
 
   console.log(`\nRunning ${testFiles.length} test files with Mocha...\n`);
 
-  const mocha = join(__dirname, "node_modules", ".bin", "mocha");
-  const result = spawnSync(process.execPath, [mocha, ...testFiles], {
+  // Use explicit file list (no shell glob)
+  const result = spawnSync(process.execPath, [
+    join(__dirname, "node_modules", ".bin", "mocha"),
+    ...testFiles,
+  ], {
     cwd: __dirname,
     stdio: "inherit",
   });
