@@ -530,6 +530,7 @@ impl ParsedContentMatch {
     }
 
     /// Match a single node type, returning the next match state if successful.
+    /// Uses the node type's index to look up the name in this content match's schema.
     pub fn match_type(&self, node_type: DynamicNodeType) -> Option<Self> {
         let name = self.schema.node_types.get(node_type.idx)?.name.clone();
         let next_state = self.expr.match_type(self.state, &name)?;
@@ -540,13 +541,26 @@ impl ParsedContentMatch {
         })
     }
 
+    /// Match a node type by name (cross-schema safe).
+    pub fn match_type_by_name(&self, name: &str) -> Option<Self> {
+        let next_state = self.expr.match_type(self.state, name)?;
+        Some(ParsedContentMatch {
+            expr: self.expr.clone(),
+            schema: self.schema.clone(),
+            state: next_state,
+        })
+    }
+
     /// Match a fragment of nodes, returning the final match state if successful.
+    /// Uses each child's type_name field (cross-schema safe).
     pub fn match_fragment(&self, fragment: &Fragment<Dyn>) -> Option<Self> {
         let mut state = self.state;
         for i in 0..fragment.child_count() {
             let child = fragment.child(i);
-            let name = self.schema.node_types.get(child.r#type().idx)?.name.clone();
-            state = self.expr.match_type(state, &name)?;
+            // Use stored type_name directly instead of index lookup — this is
+            // cross-schema safe because type_name is stored by value on each node.
+            let name = &child.type_name;
+            state = self.expr.match_type(state, name)?;
         }
         Some(ParsedContentMatch {
             expr: self.expr.clone(),
@@ -557,32 +571,32 @@ impl ParsedContentMatch {
 
     /// Try to find a fragment of nodes that can be inserted before `after`
     /// to make the content match.
+    /// The caller is expected to have set the thread-local schema context via
+    /// DynamicSchema::with_types() before calling this method.
     pub fn fill_before(
         &self,
         after: &Fragment<Dyn>,
         to_end: bool,
         start_index: usize,
     ) -> Option<Fragment<Dyn>> {
-        self.schema.with_types(|| {
-            with_types(|store| {
-                let mut seen = std::collections::HashSet::new();
-                seen.insert(self.state);
-                let mut types = Vec::new();
-                let result = fill_before_search(
-                    &self.expr,
-                    self.state,
-                    after,
-                    start_index,
-                    to_end,
-                    &mut seen,
-                    &mut types,
-                    store,
-                    0,
-                )?;
-                Some(Fragment::from(result))
-            })
-            .flatten()
+        with_types(|store| {
+            let mut seen = std::collections::HashSet::new();
+            seen.insert(self.state);
+            let mut types = Vec::new();
+            let result = fill_before_search(
+                &self.expr,
+                self.state,
+                after,
+                start_index,
+                to_end,
+                &mut seen,
+                &mut types,
+                store,
+                0,
+            )?;
+            Some(Fragment::from(result))
         })
+        .flatten()
     }
 
     /// The number of outgoing edges from the current DFA state.
@@ -755,7 +769,8 @@ fn fill_before_search(
     let mut can_match = true;
     for i in start_index..after.child_count() {
         if let Some(child) = after.maybe_child(i) {
-            let name = &store.node_types[child.r#type().idx].name;
+            // Use stored type_name directly (cross-schema safe)
+            let name = &child.type_name;
             match expr.match_type(match_state, name) {
                 Some(next) => match_state = next,
                 None => {

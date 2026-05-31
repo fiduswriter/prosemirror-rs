@@ -1375,12 +1375,13 @@ impl BContentMatch {
     }
 
     pub fn match_type(&self, type_: &BNodeType) -> Option<BContentMatch> {
-        self.schema
-            .with_types(|| self.inner.match_type(type_.inner))
-            .map(|inner| BContentMatch {
-                schema: self.schema.clone(),
-                inner,
-            })
+        // Use the node type name directly — this is cross-schema safe because
+        // BNodeType.name is stored by value, not by index.
+        let inner = self.inner.match_type_by_name(&type_.name)?;
+        Some(BContentMatch {
+            schema: self.schema.clone(),
+            inner,
+        })
     }
 
     pub fn match_fragment(
@@ -1391,12 +1392,13 @@ impl BContentMatch {
     ) -> Option<BContentMatch> {
         // The Rust API only supports matching whole fragments; start/end is
         // ignored.  (The JS API is also rarely called with non-default args.)
-        self.schema
-            .with_types(|| self.inner.match_fragment(&frag.inner))
-            .map(|inner| BContentMatch {
-                schema: self.schema.clone(),
-                inner,
-            })
+        // ParsedContentMatch::match_fragment now uses child.type_name directly,
+        // making this cross-schema safe.
+        let inner = self.inner.match_fragment(&frag.inner)?;
+        Some(BContentMatch {
+            schema: self.schema.clone(),
+            inner,
+        })
     }
 
     pub fn fill_before(
@@ -1405,12 +1407,18 @@ impl BContentMatch {
         to_end: bool,
         start_index: usize,
     ) -> Option<BFragment> {
-        self.schema
-            .with_types(|| self.inner.fill_before(&after.inner, to_end, start_index))
-            .map(|inner| BFragment {
-                schema: self.schema.clone(),
+        // Use the after fragment's schema context when calling fill_before,
+        // so that any filler nodes created have type indices matching the
+        // fragment's schema (cross-schema safe).
+        // The ParsedContentMatch methods use child.type_name directly for
+        // matching, so the actual expression matching is also cross-schema safe.
+        after.schema.with_types(|| {
+            let inner = self.inner.fill_before(&after.inner, to_end, start_index)?;
+            Some(BFragment {
+                schema: after.schema.clone(),
                 inner,
             })
+        })
     }
 
     // TODO(docs/PLAN.md): `default_type`, `find_wrapping`, `edge_count`, and

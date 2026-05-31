@@ -25,11 +25,11 @@ Object.defineProperty(BridgedSchema.prototype, "__wbg_ptr", {
   configurable: true,
 });
 Object.defineProperty(BridgedSchema.prototype, "nodes", {
-  get() { return this._wasm.nodes(); },
+  get() { return this._wasm.nodes; },
   configurable: true,
 });
 Object.defineProperty(BridgedSchema.prototype, "marks", {
-  get() { return this._wasm.marks(); },
+  get() { return this._wasm.marks; },
   configurable: true,
 });
 Object.defineProperty(BridgedSchema.prototype, "topNodeType", {
@@ -108,6 +108,27 @@ BridgedSchema.prototype.markFromJSON = BridgedSchema.prototype.markFromJson;
 OrigSchema.fromJSON = function (spec) {
   return new BridgedSchema(spec);
 };
+
+// Add nodes/marks getters to WASM Schema so doc.type.schema.nodes works
+// (the test accesses .nodes as a property, but WASM exports it as a method)
+(function() {
+  var _origNodes = OrigSchema.prototype.nodes;
+  var _origMarks = OrigSchema.prototype.marks;
+  if (_origNodes && typeof _origNodes === "function") {
+    Object.defineProperty(OrigSchema.prototype, "nodes", {
+      get: function() { return _origNodes.call(this); },
+      configurable: true
+    });
+    OrigSchema.prototype._origNodes = _origNodes;
+  }
+  if (_origMarks && typeof _origMarks === "function") {
+    Object.defineProperty(OrigSchema.prototype, "marks", {
+      get: function() { return _origMarks.call(this); },
+      configurable: true
+    });
+    OrigSchema.prototype._origMarks = _origMarks;
+  }
+})();
 
 // Patch raw WASM Schema methods
 const origSchemaText = OrigSchema.prototype.text;
@@ -275,11 +296,9 @@ OrigFragment.from = function (input, schema) {
   }
   return origFragmentFrom(input);
 };
-OrigFragment.fromArray = function (nodes, schema) {
-  const s = schema || (OrigFragment._lastSchema);
-  if (s) return origFragmentFromArray(s, nodes);
-  // Fallback: try to get schema from first node
-  return origFragmentFromArray(nodes);
+OrigFragment.fromArray = function (schema, nodes) {
+  // Direct passthrough to WASM Fragment.fromArray(schema, nodes)
+  return origFragmentFromArray(schema, nodes);
 };
 OrigFragment._wasmBridged = true;
 
