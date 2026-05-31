@@ -12,11 +12,12 @@ use pyo3::types::{PyDict, PyList};
 static SCHEMA_RAW_SPECS: std::sync::LazyLock<Mutex<HashMap<usize, Py<PyAny>>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
+use prosemirror::binding::model::{BContentMatch, BMarkType, BNode, BNodeType};
 use prosemirror::dynamic::types::{
     Dyn, DynamicMark, DynamicMarkType, DynamicNode, DynamicNodeType, ParsedContentMatch,
 };
 use prosemirror::dynamic::DynamicSchema;
-use prosemirror::model::{Fragment, MarkSet, Node, NodeType, ResolvedPos, Slice};
+use prosemirror::model::{Fragment, MarkSet, MarkType, Node, NodeType, ResolvedPos, Slice};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -450,6 +451,61 @@ impl PyNodeType {
         }))
     }
 
+    #[pyo3(signature = (attrs=None, content=None, marks=None))]
+    fn create_checked(
+        &self,
+        attrs: Option<&Bound<'_, PyAny>>,
+        content: Option<&Bound<'_, PyAny>>,
+        marks: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyNode> {
+        let node = self.create(attrs, content, marks)?;
+        node.check()?;
+        Ok(node)
+    }
+
+    #[getter]
+    fn is_text(&self) -> bool {
+        self.name == "text"
+    }
+
+    #[getter]
+    fn whitespace(&self) -> String {
+        self.schema.with_types(|| {
+            self.inner
+                .whitespace()
+                .unwrap_or_else(|| "normal".to_string())
+        })
+    }
+
+    #[getter]
+    fn is_code(&self) -> bool {
+        self.whitespace() == "pre"
+    }
+
+    #[getter]
+    fn has_required_attrs(&self) -> bool {
+        self.schema.with_types(|| self.inner.has_required_attrs())
+    }
+
+    fn compatible_content(&self, other: &PyNodeType) -> bool {
+        self.schema
+            .with_types(|| self.inner.compatible_content(other.inner))
+    }
+
+    #[getter]
+    fn content_match(&self) -> Option<PyContentMatch> {
+        let b = BNodeType::new(self.schema.clone(), self.inner, self.name.clone());
+        b.content_match().map(|cm| PyContentMatch {
+            schema: self.schema.clone(),
+            inner: cm.inner,
+        })
+    }
+
+    fn allows_marks(&self, marks: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let ms = extract_markset(marks)?;
+        Ok(self.schema.with_types(|| self.inner.allow_marks(&ms)))
+    }
+
     fn __str__(&self) -> String {
         self.name.clone()
     }
@@ -494,6 +550,42 @@ impl PyMarkType {
                 attrs,
             },
         })
+    }
+
+    fn remove_from_set(&self, set: &Bound<'_, PyAny>) -> PyResult<Vec<PyMark>> {
+        let ms = extract_markset(set)?;
+        let bmt = BMarkType {
+            schema: self.schema.clone(),
+            inner: self.inner,
+            name: self.name.clone(),
+        };
+        let result = bmt.remove_from_set(ms.iter().cloned().collect());
+        Ok(result
+            .into_iter()
+            .map(|m| PyMark {
+                schema: self.schema.clone(),
+                inner: m,
+            })
+            .collect())
+    }
+
+    fn is_in_set(&self, set: &Bound<'_, PyAny>) -> PyResult<Option<PyMark>> {
+        let ms = extract_markset(set)?;
+        let bmt = BMarkType {
+            schema: self.schema.clone(),
+            inner: self.inner,
+            name: self.name.clone(),
+        };
+        Ok(bmt
+            .is_in_set(&ms.iter().cloned().collect::<Vec<_>>())
+            .map(|bm| PyMark {
+                schema: self.schema.clone(),
+                inner: bm.inner,
+            }))
+    }
+
+    fn excludes(&self, other: &PyMarkType) -> bool {
+        self.schema.with_types(|| self.inner.excludes(other.inner))
     }
 
     fn __str__(&self) -> String {
@@ -575,6 +667,14 @@ impl PyMark {
         let set = extract_markset(set)?;
         let present = self.schema.with_types(|| set.contains(&self.inner));
         Ok(present)
+    }
+
+    fn to_json(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let val = serde_json::json!({
+            "type": self.inner.type_name,
+            "attrs": self.inner.attrs,
+        });
+        json_to_py(py, &val).map(|b| b.unbind())
     }
 
     fn eq(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
@@ -768,6 +868,170 @@ impl PyFragment {
         })
     }
 
+    #[getter]
+    fn first_child(&self) -> Option<PyNode> {
+        self.inner.first_child().map(|n| PyNode {
+            schema: self.schema.clone(),
+            inner: n.clone(),
+        })
+    }
+
+    #[getter]
+    fn last_child(&self) -> Option<PyNode> {
+        self.inner.last_child().map(|n| PyNode {
+            schema: self.schema.clone(),
+            inner: n.clone(),
+        })
+    }
+
+    fn replace_child(&self, index: usize, node: &PyNode) -> PyFragment {
+        let inner = self.schema.with_types(|| {
+            self.inner
+                .replace_child(index, node.inner.clone())
+                .into_owned()
+        });
+        PyFragment {
+            schema: self.schema.clone(),
+            inner,
+        }
+    }
+
+    fn add_to_start(&self, node: &PyNode) -> PyFragment {
+        let inner = self
+            .schema
+            .with_types(|| self.inner.add_to_start(node.inner.clone()));
+        PyFragment {
+            schema: self.schema.clone(),
+            inner,
+        }
+    }
+
+    fn add_to_end(&self, node: &PyNode) -> PyFragment {
+        let inner = self
+            .schema
+            .with_types(|| self.inner.add_to_end(node.inner.clone()));
+        PyFragment {
+            schema: self.schema.clone(),
+            inner,
+        }
+    }
+
+    #[pyo3(signature = (from_, to, block_separator=None, leaf_text=None))]
+    fn text_between(
+        &self,
+        from_: usize,
+        to: usize,
+        block_separator: Option<&str>,
+        leaf_text: Option<&str>,
+    ) -> String {
+        let mut buf = String::new();
+        self.schema.with_types(|| {
+            self.inner
+                .text_between(&mut buf, false, from_, to, block_separator, leaf_text)
+        });
+        buf
+    }
+
+    fn for_each(&self, py: Python<'_>, f: Py<PyAny>) -> PyResult<()> {
+        let mut items: Vec<(DynamicNode, usize, usize)> = Vec::new();
+        self.schema.with_types(|| {
+            self.inner.for_each(|n, o, i| items.push((n.clone(), o, i)));
+        });
+        for (node, offset, index) in items {
+            f.call1(
+                py,
+                (
+                    PyNode {
+                        schema: self.schema.clone(),
+                        inner: node,
+                    },
+                    offset,
+                    index,
+                ),
+            )?;
+        }
+        Ok(())
+    }
+
+    #[pyo3(signature = (from_, to, f, node_start=0))]
+    fn nodes_between(
+        &self,
+        py: Python<'_>,
+        from_: usize,
+        to: usize,
+        f: Py<PyAny>,
+        node_start: usize,
+    ) -> PyResult<()> {
+        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
+        self.schema.with_types(|| {
+            self.inner.nodes_between(
+                from_,
+                to,
+                &mut |n, p, parent, index| {
+                    items.push((n.clone(), p, parent.cloned(), index));
+                    true
+                },
+                node_start,
+                None,
+            );
+        });
+        for (node, pos, parent, index) in items {
+            let py_parent = parent.map(|par| PyNode {
+                schema: self.schema.clone(),
+                inner: par,
+            });
+            f.call1(
+                py,
+                (
+                    PyNode {
+                        schema: self.schema.clone(),
+                        inner: node,
+                    },
+                    pos,
+                    py_parent,
+                    index,
+                ),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn descendants(&self, py: Python<'_>, f: Py<PyAny>) -> PyResult<()> {
+        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
+        self.schema.with_types(|| {
+            let size = self.inner.size();
+            self.inner.nodes_between(
+                0,
+                size,
+                &mut |n, p, parent, index| {
+                    items.push((n.clone(), p, parent.cloned(), index));
+                    true
+                },
+                0,
+                None,
+            );
+        });
+        for (node, pos, parent, index) in items {
+            let py_parent = parent.map(|par| PyNode {
+                schema: self.schema.clone(),
+                inner: par,
+            });
+            f.call1(
+                py,
+                (
+                    PyNode {
+                        schema: self.schema.clone(),
+                        inner: node,
+                    },
+                    pos,
+                    py_parent,
+                    index,
+                ),
+            )?;
+        }
+        Ok(())
+    }
+
     fn find_diff_start(&self, other: &PyFragment) -> PyResult<Option<usize>> {
         Ok(self
             .schema
@@ -828,6 +1092,11 @@ impl PySlice {
     #[getter]
     fn open_end(&self) -> usize {
         self.inner.open_end
+    }
+
+    #[getter]
+    fn size(&self) -> usize {
+        self.inner.size()
     }
 
     fn eq(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
@@ -1078,6 +1347,159 @@ impl PyNode {
         }))
     }
 
+    fn maybe_child(&self, index: usize) -> Option<PyNode> {
+        Node::maybe_child(&self.inner, index).map(|n| PyNode {
+            schema: self.schema.clone(),
+            inner: n.clone(),
+        })
+    }
+
+    #[getter]
+    fn is_inline(&self) -> bool {
+        self.schema.with_types(|| self.inner.is_inline())
+    }
+
+    #[getter]
+    fn is_textblock(&self) -> bool {
+        self.schema.with_types(|| self.inner.is_textblock())
+    }
+
+    #[getter]
+    fn is_atom(&self) -> bool {
+        self.schema.with_types(|| self.inner.is_atom())
+    }
+
+    #[getter]
+    fn inline_content(&self) -> bool {
+        self.schema.with_types(|| self.inner.inline_content())
+    }
+
+    fn same_markup(&self, other: &PyNode) -> bool {
+        self.schema
+            .with_types(|| self.inner.same_markup(&other.inner))
+    }
+
+    fn range_has_mark(&self, from: usize, to: usize, mark_type: &PyMarkType) -> bool {
+        self.schema
+            .with_types(|| self.inner.range_has_mark(from, to, mark_type.inner))
+    }
+
+    fn can_append(&self, other: &PyNode) -> bool {
+        self.schema
+            .with_types(|| self.inner.can_append(&other.inner))
+    }
+
+    fn content_match_at(&self, index: usize) -> PyResult<PyContentMatch> {
+        let schema = self.schema.clone();
+        let inner = schema.with_types(|| {
+            let dcm = Node::content_match_at(&self.inner, index)
+                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            ParsedContentMatch::from_dynamic(dcm, schema.clone())
+                .ok_or_else(|| PyValueError::new_err("content_match_at: conversion failed"))
+        })?;
+        Ok(PyContentMatch {
+            schema: self.schema.clone(),
+            inner,
+        })
+    }
+
+    fn for_each(&self, py: Python<'_>, f: Py<PyAny>) -> PyResult<()> {
+        let mut items: Vec<(DynamicNode, usize, usize)> = Vec::new();
+        self.schema.with_types(|| {
+            <DynamicNode as Node<Dyn>>::for_each(&self.inner, &mut |n, o, i| {
+                items.push((n.clone(), o, i))
+            });
+        });
+        for (node, offset, index) in items {
+            f.call1(
+                py,
+                (
+                    PyNode {
+                        schema: self.schema.clone(),
+                        inner: node,
+                    },
+                    offset,
+                    index,
+                ),
+            )?;
+        }
+        Ok(())
+    }
+
+    #[pyo3(signature = (from_, to, f, start_pos=0))]
+    fn nodes_between(
+        &self,
+        py: Python<'_>,
+        from_: usize,
+        to: usize,
+        f: Py<PyAny>,
+        start_pos: usize,
+    ) -> PyResult<()> {
+        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
+        self.schema.with_types(|| {
+            <DynamicNode as Node<Dyn>>::nodes_between(
+                &self.inner,
+                from_,
+                to,
+                &mut |n, p, parent, index| {
+                    items.push((n.clone(), p, parent.cloned(), index));
+                    true // always recurse — early-termination via false not yet supported
+                },
+                start_pos,
+            );
+        });
+        for (node, pos, parent, index) in items {
+            let py_parent = parent.map(|par| PyNode {
+                schema: self.schema.clone(),
+                inner: par,
+            });
+            let ret = f.call1(
+                py,
+                (
+                    PyNode {
+                        schema: self.schema.clone(),
+                        inner: node,
+                    },
+                    pos,
+                    py_parent,
+                    index,
+                ),
+            )?;
+            let _ = ret;
+        }
+        Ok(())
+    }
+
+    fn descendants(&self, py: Python<'_>, f: Py<PyAny>) -> PyResult<()> {
+        let mut items: Vec<(DynamicNode, usize, Option<DynamicNode>, usize)> = Vec::new();
+        self.schema.with_types(|| {
+            <DynamicNode as Node<Dyn>>::descendants(&self.inner, &mut |n, p, parent, index| {
+                items.push((n.clone(), p, parent.cloned(), index));
+                true
+            });
+        });
+        for (node, pos, parent, index) in items {
+            let py_parent = parent.map(|par| PyNode {
+                schema: self.schema.clone(),
+                inner: par,
+            });
+            let ret = f.call1(
+                py,
+                (
+                    PyNode {
+                        schema: self.schema.clone(),
+                        inner: node,
+                    },
+                    pos,
+                    py_parent,
+                    index,
+                ),
+            )?;
+            let _ = ret;
+        }
+        Ok(())
+    }
+
     #[pyo3(signature = (from_, to, block_separator=None, leaf_text=None))]
     fn text_between(
         &self,
@@ -1282,6 +1704,127 @@ impl PyResolvedPos {
         Ok(result)
     }
 
+    #[getter]
+    fn parent(&self) -> PyNode {
+        let inner = self.schema.with_types(|| {
+            ResolvedPos::<Dyn>::resolve(&self.doc, self.pos)
+                .map(|r| r.parent().clone())
+                .unwrap_or_else(|_| self.doc.clone())
+        });
+        PyNode {
+            schema: self.schema.clone(),
+            inner,
+        }
+    }
+
+    #[getter]
+    fn doc(&self) -> PyNode {
+        PyNode {
+            schema: self.schema.clone(),
+            inner: self.doc.clone(),
+        }
+    }
+
+    #[getter]
+    fn text_offset(&self) -> usize {
+        self.schema.with_types(|| {
+            ResolvedPos::<Dyn>::resolve(&self.doc, self.pos)
+                .map(|r| r.text_offset())
+                .unwrap_or(0)
+        })
+    }
+
+    #[pyo3(signature = (depth=None))]
+    fn index(&self, depth: Option<usize>) -> usize {
+        self.schema.with_types(|| {
+            ResolvedPos::<Dyn>::resolve(&self.doc, self.pos)
+                .map(|r| {
+                    let d = depth.unwrap_or(r.depth);
+                    r.index(d)
+                })
+                .unwrap_or(0)
+        })
+    }
+
+    #[pyo3(signature = (depth=None))]
+    fn index_after(&self, depth: Option<usize>) -> usize {
+        self.schema.with_types(|| {
+            ResolvedPos::<Dyn>::resolve(&self.doc, self.pos)
+                .map(|r| {
+                    let d = depth.unwrap_or(r.depth);
+                    r.index_after(d)
+                })
+                .unwrap_or(0)
+        })
+    }
+
+    fn shared_depth(&self, pos: usize) -> usize {
+        self.schema.with_types(|| {
+            ResolvedPos::<Dyn>::resolve(&self.doc, self.pos)
+                .map(|r| r.shared_depth(pos))
+                .unwrap_or(0)
+        })
+    }
+
+    fn marks_across(&self, end: &PyResolvedPos) -> PyResult<Option<Vec<PyMark>>> {
+        let result = self.schema.with_types(|| {
+            let a = ResolvedPos::<Dyn>::resolve(&self.doc, self.pos).ok()?;
+            let b = ResolvedPos::<Dyn>::resolve(&end.doc, end.pos).ok()?;
+            a.marks_across(&b)
+        });
+        Ok(result.map(|ms| {
+            ms.into_iter()
+                .map(|m| PyMark {
+                    schema: self.schema.clone(),
+                    inner: m,
+                })
+                .collect()
+        }))
+    }
+
+    fn same_parent(&self, other: &PyResolvedPos) -> bool {
+        self.schema.with_types(|| {
+            let a = ResolvedPos::<Dyn>::resolve(&self.doc, self.pos).ok();
+            let b = ResolvedPos::<Dyn>::resolve(&other.doc, other.pos).ok();
+            match (a, b) {
+                (Some(a), Some(b)) => a.same_parent(&b),
+                _ => false,
+            }
+        })
+    }
+
+    fn max(&self, other: &PyResolvedPos) -> PyResolvedPos {
+        if self.pos >= other.pos {
+            PyResolvedPos {
+                schema: self.schema.clone(),
+                doc: self.doc.clone(),
+                pos: self.pos,
+            }
+        } else {
+            PyResolvedPos {
+                schema: other.schema.clone(),
+                doc: other.doc.clone(),
+                pos: other.pos,
+            }
+        }
+    }
+
+    fn min(&self, other: &PyResolvedPos) -> PyResolvedPos {
+        if self.pos <= other.pos {
+            PyResolvedPos {
+                schema: self.schema.clone(),
+                doc: self.doc.clone(),
+                pos: self.pos,
+            }
+        } else {
+            PyResolvedPos {
+                schema: other.schema.clone(),
+                doc: other.doc.clone(),
+                pos: other.pos,
+            }
+        }
+    }
+
     fn __str__(&self) -> String {
         self.schema.with_types(|| {
             if let Ok(r) = ResolvedPos::<Dyn>::resolve(&self.doc, self.pos) {
@@ -1363,10 +1906,54 @@ impl PyNodeRange {
     fn end(&self) -> usize {
         self.to_pos
     }
+
+    #[getter]
+    fn parent(&self) -> PyNode {
+        let inner = self.schema.with_types(|| {
+            // from_pos is nr.start() = $from.before(depth+1); resolve it+1 to get into the child
+            let pos = if self.from_pos + 1 <= self.from_doc.content_size() {
+                self.from_pos + 1
+            } else {
+                self.from_pos
+            };
+            ResolvedPos::<Dyn>::resolve(&self.from_doc, pos)
+                .map(|r| r.node(self.depth).clone())
+                .unwrap_or_else(|_| self.from_doc.clone())
+        });
+        PyNode {
+            schema: self.schema.clone(),
+            inner,
+        }
+    }
+
+    #[getter]
+    fn start_index(&self) -> usize {
+        self.schema.with_types(|| {
+            let pos = if self.from_pos + 1 <= self.from_doc.content_size() {
+                self.from_pos + 1
+            } else {
+                self.from_pos
+            };
+            ResolvedPos::<Dyn>::resolve(&self.from_doc, pos)
+                .map(|r| r.index(self.depth))
+                .unwrap_or(0)
+        })
+    }
+
+    #[getter]
+    fn end_index(&self) -> usize {
+        self.schema.with_types(|| {
+            let pos = if self.to_pos > 0 { self.to_pos - 1 } else { 0 };
+            ResolvedPos::<Dyn>::resolve(&self.from_doc, pos)
+                .map(|r| r.index_after(self.depth))
+                .unwrap_or(0)
+        })
+    }
 }
 
 #[pyclass(name = "ContentMatch")]
 pub struct PyContentMatch {
+    pub(crate) schema: Arc<DynamicSchema>,
     pub(crate) inner: ParsedContentMatch,
 }
 
@@ -1386,7 +1973,7 @@ impl PyContentMatch {
         let schema = schema.ok_or_else(|| PyValueError::new_err("No valid node types provided"))?;
         let inner = ParsedContentMatch::parse(expr, &schema)
             .map_err(|e| PyValueError::new_err(format!("Content expression parse error: {e}")))?;
-        Ok(PyContentMatch { inner })
+        Ok(PyContentMatch { schema, inner })
     }
 
     #[getter]
@@ -1397,13 +1984,19 @@ impl PyContentMatch {
     fn match_type(&self, node_type: &PyNodeType) -> Option<PyContentMatch> {
         self.inner
             .match_type(node_type.inner)
-            .map(|cm| PyContentMatch { inner: cm })
+            .map(|cm| PyContentMatch {
+                schema: self.schema.clone(),
+                inner: cm,
+            })
     }
 
     fn match_fragment(&self, fragment: &PyFragment) -> Option<PyContentMatch> {
         self.inner
             .match_fragment(&fragment.inner)
-            .map(|cm| PyContentMatch { inner: cm })
+            .map(|cm| PyContentMatch {
+                schema: self.schema.clone(),
+                inner: cm,
+            })
     }
 
     #[pyo3(signature = (fragment, to_end=false, start_index=0))]
@@ -1419,5 +2012,64 @@ impl PyContentMatch {
                 schema: fragment.schema.clone(),
                 inner: f,
             })
+    }
+
+    #[getter]
+    fn default_type(&self) -> Option<PyNodeType> {
+        let b = BContentMatch {
+            schema: self.schema.clone(),
+            inner: self.inner.clone(),
+        };
+        b.default_type().map(|nt| PyNodeType {
+            schema: self.schema.clone(),
+            inner: nt.inner,
+            name: nt.name,
+        })
+    }
+
+    fn find_wrapping(&self, target: &PyNodeType) -> Option<Vec<PyNodeType>> {
+        let b = BContentMatch {
+            schema: self.schema.clone(),
+            inner: self.inner.clone(),
+        };
+        let bt = BNodeType::new(target.schema.clone(), target.inner, target.name.clone());
+        b.find_wrapping(&bt).map(|types| {
+            types
+                .into_iter()
+                .map(|nt| PyNodeType {
+                    schema: self.schema.clone(),
+                    inner: nt.inner,
+                    name: nt.name,
+                })
+                .collect()
+        })
+    }
+
+    #[getter]
+    fn edge_count(&self) -> usize {
+        self.inner.edge_count()
+    }
+
+    fn edge_type(&self, n: usize) -> Option<PyNodeType> {
+        let b = BContentMatch {
+            schema: self.schema.clone(),
+            inner: self.inner.clone(),
+        };
+        b.edge(n).map(|(nt, _)| PyNodeType {
+            schema: self.schema.clone(),
+            inner: nt.inner,
+            name: nt.name,
+        })
+    }
+
+    fn edge_match(&self, n: usize) -> Option<PyContentMatch> {
+        let b = BContentMatch {
+            schema: self.schema.clone(),
+            inner: self.inner.clone(),
+        };
+        b.edge(n).map(|(_, cm)| PyContentMatch {
+            schema: self.schema.clone(),
+            inner: cm.inner,
+        })
     }
 }

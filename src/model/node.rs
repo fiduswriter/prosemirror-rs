@@ -492,7 +492,7 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
     }
 
     /// Invoke a callback for all descendant nodes between `from` and `to`
-    fn nodes_between<F: FnMut(&S::Node, usize) -> bool>(
+    fn nodes_between<F: FnMut(&S::Node, usize, Option<&S::Node>, usize) -> bool>(
         &self,
         from: usize,
         to: usize,
@@ -500,12 +500,12 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
         offset: usize,
     ) {
         if let Some(c) = self.content() {
-            c.nodes_between(from, to, f, offset);
+            c.nodes_between(from, to, f, offset, Some(self));
         }
     }
 
     /// Invoke a callback for all descendant nodes
-    fn descendants<F: FnMut(&S::Node, usize) -> bool>(&self, f: &mut F) {
+    fn descendants<F: FnMut(&S::Node, usize, Option<&S::Node>, usize) -> bool>(&self, f: &mut F) {
         let size = self.content_size();
         self.nodes_between(0, size, f, 0);
     }
@@ -545,7 +545,7 @@ pub trait Node<S: Schema<Node = Self> + 'static>:
         self.nodes_between(
             from,
             to,
-            &mut |node, _pos| {
+            &mut |node, _pos, _parent, _index| {
                 if let Some(marks) = node.marks() {
                     for m in marks {
                         if m.r#type() == mark_type {

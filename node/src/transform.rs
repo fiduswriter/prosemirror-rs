@@ -5,6 +5,7 @@ use napi_derive::napi;
 use serde_json::Value;
 
 use crate::model::{MarkType_, Mark_, Node_, Slice_};
+use prosemirror::binding::model::BNode;
 use prosemirror::dynamic::types::{Dyn, DynamicNodeType};
 use prosemirror::dynamic::DynamicSchema;
 use prosemirror::model::{Fragment, MarkSet, NodeType, Slice};
@@ -201,11 +202,16 @@ impl Step_ {
 
     #[napi]
     pub fn apply(&self, doc: &Node_) -> napi::Result<Node_> {
-        let result = doc.schema.with_types(|| self.inner.apply(&doc.inner));
+        let result = doc
+            .inner
+            .schema
+            .with_types(|| self.inner.apply(&doc.inner.inner));
         match result {
             Ok(node) => Ok(Node_ {
-                schema: doc.schema.clone(),
-                inner: node,
+                inner: BNode {
+                    schema: doc.inner.schema.clone(),
+                    inner: node,
+                },
             }),
             Err(e) => Err(napi::Error::new(
                 Status::InvalidArg,
@@ -223,7 +229,10 @@ impl Step_ {
 
     #[napi]
     pub fn invert(&self, doc: &Node_) -> Step_ {
-        let step = doc.schema.with_types(|| self.inner.invert(&doc.inner));
+        let step = doc
+            .inner
+            .schema
+            .with_types(|| self.inner.invert(&doc.inner.inner));
         Step_ { inner: step }
     }
 
@@ -240,7 +249,7 @@ impl Step_ {
     #[napi(factory)]
     pub fn replace(from: u32, to: u32, slice: Option<&Slice_>, structure: Option<bool>) -> Step_ {
         let slice = slice
-            .map(|s| s.inner.clone())
+            .map(|s| s.inner.inner.clone())
             .unwrap_or_else(|| Slice::new(Fragment::new(), 0, 0));
         Step_ {
             inner: Step::Replace(ReplaceStep {
@@ -265,7 +274,7 @@ impl Step_ {
         structure: Option<bool>,
     ) -> Step_ {
         let slice = slice
-            .map(|s| s.inner.clone())
+            .map(|s| s.inner.inner.clone())
             .unwrap_or_else(|| Slice::new(Fragment::new(), 0, 0));
         Step_ {
             inner: Step::ReplaceAround(ReplaceAroundStep {
@@ -290,7 +299,7 @@ impl Step_ {
                     from: from as usize,
                     to: to as usize,
                 },
-                mark: mark.inner.clone(),
+                mark: mark.inner.inner.clone(),
             }),
         }
     }
@@ -303,7 +312,7 @@ impl Step_ {
                     from: from as usize,
                     to: to as usize,
                 },
-                mark: mark.inner.clone(),
+                mark: mark.inner.inner.clone(),
             }),
         }
     }
@@ -313,7 +322,7 @@ impl Step_ {
         Step_ {
             inner: Step::AddNodeMark(AddNodeMarkStep {
                 pos: pos as usize,
-                mark: mark.inner.clone(),
+                mark: mark.inner.inner.clone(),
             }),
         }
     }
@@ -323,7 +332,7 @@ impl Step_ {
         Step_ {
             inner: Step::RemoveNodeMark(RemoveNodeMarkStep {
                 pos: pos as usize,
-                mark: mark.inner.clone(),
+                mark: mark.inner.inner.clone(),
             }),
         }
     }
@@ -362,16 +371,18 @@ impl Transform_ {
     #[napi(constructor)]
     pub fn new(doc: &Node_) -> Self {
         Transform_ {
-            schema: doc.schema.clone(),
-            inner: Transform::new(doc.inner.clone()),
+            schema: doc.inner.schema.clone(),
+            inner: Transform::new(doc.inner.inner.clone()),
         }
     }
 
     #[napi(getter)]
     pub fn doc(&self) -> Node_ {
         Node_ {
-            schema: self.schema.clone(),
-            inner: self.inner.doc.clone(),
+            inner: BNode {
+                schema: self.schema.clone(),
+                inner: self.inner.doc.clone(),
+            },
         }
     }
 
@@ -390,8 +401,10 @@ impl Transform_ {
             .docs
             .iter()
             .map(|d| Node_ {
-                schema: self.schema.clone(),
-                inner: d.clone(),
+                inner: BNode {
+                    schema: self.schema.clone(),
+                    inner: d.clone(),
+                },
             })
             .collect()
     }
@@ -406,8 +419,10 @@ impl Transform_ {
     #[napi(getter)]
     pub fn before(&self) -> Node_ {
         Node_ {
-            schema: self.schema.clone(),
-            inner: self.inner.before().clone(),
+            inner: BNode {
+                schema: self.schema.clone(),
+                inner: self.inner.before().clone(),
+            },
         }
     }
 
@@ -432,7 +447,7 @@ impl Transform_ {
 
     #[napi]
     pub fn replace(&mut self, from: u32, to: Option<u32>, slice: Option<&Slice_>) {
-        let slice = slice.map(|s| s.inner.clone());
+        let slice = slice.map(|s| s.inner.inner.clone());
         self.schema.with_types(|| {
             self.inner
                 .replace(from as usize, to.map(|t| t as usize), slice);
@@ -445,7 +460,7 @@ impl Transform_ {
             self.inner.replace_with(
                 from as usize,
                 to as usize,
-                Fragment::from(vec![content.inner.clone()]),
+                Fragment::from(vec![content.inner.inner.clone()]),
             );
         });
     }
@@ -460,8 +475,10 @@ impl Transform_ {
     #[napi]
     pub fn insert(&mut self, pos: u32, content: &Node_) {
         self.schema.with_types(|| {
-            self.inner
-                .insert(pos as usize, Fragment::from(vec![content.inner.clone()]));
+            self.inner.insert(
+                pos as usize,
+                Fragment::from(vec![content.inner.inner.clone()]),
+            );
         });
     }
 
@@ -469,13 +486,13 @@ impl Transform_ {
     pub fn add_mark(&mut self, from: u32, to: u32, mark: &Mark_) {
         self.schema.with_types(|| {
             self.inner
-                .add_mark(from as usize, to as usize, mark.inner.clone());
+                .add_mark(from as usize, to as usize, mark.inner.inner.clone());
         });
     }
 
     #[napi]
     pub fn remove_mark(&mut self, from: u32, to: u32, mark: Option<&Mark_>) {
-        let mark = mark.map(|m| MarkOrType::Mark(m.inner.clone()));
+        let mark = mark.map(|m| MarkOrType::Mark(m.inner.inner.clone()));
         self.schema.with_types(|| {
             self.inner.remove_mark(from as usize, to as usize, mark);
         });
@@ -487,7 +504,7 @@ impl Transform_ {
             self.inner.remove_mark(
                 from as usize,
                 to as usize,
-                Some(MarkOrType::MarkType(mark_type.inner)),
+                Some(MarkOrType::MarkType(mark_type.inner.inner)),
             );
         });
     }
@@ -495,7 +512,8 @@ impl Transform_ {
     #[napi]
     pub fn add_node_mark(&mut self, pos: u32, mark: &Mark_) {
         self.schema.with_types(|| {
-            self.inner.add_node_mark(pos as usize, mark.inner.clone());
+            self.inner
+                .add_node_mark(pos as usize, mark.inner.inner.clone());
         });
     }
 
@@ -503,7 +521,7 @@ impl Transform_ {
     pub fn remove_node_mark(&mut self, pos: u32, mark: &Mark_) {
         self.schema.with_types(|| {
             self.inner
-                .remove_node_mark(pos as usize, MarkOrType::Mark(mark.inner.clone()));
+                .remove_node_mark(pos as usize, MarkOrType::Mark(mark.inner.inner.clone()));
         });
     }
 
@@ -511,7 +529,7 @@ impl Transform_ {
     pub fn remove_node_mark_type(&mut self, pos: u32, mark_type: &MarkType_) {
         self.schema.with_types(|| {
             self.inner
-                .remove_node_mark(pos as usize, MarkOrType::MarkType(mark_type.inner));
+                .remove_node_mark(pos as usize, MarkOrType::MarkType(mark_type.inner.inner));
         });
     }
 
@@ -519,7 +537,7 @@ impl Transform_ {
     pub fn replace_range(&mut self, from: u32, to: u32, slice: &Slice_) {
         self.schema.with_types(|| {
             self.inner
-                .replace_range(from as usize, to as usize, slice.inner.clone());
+                .replace_range(from as usize, to as usize, slice.inner.inner.clone());
         });
     }
 
@@ -527,7 +545,7 @@ impl Transform_ {
     pub fn replace_range_with(&mut self, from: u32, to: u32, node: &Node_) {
         self.schema.with_types(|| {
             self.inner
-                .replace_range_with(from as usize, to as usize, node.inner.clone());
+                .replace_range_with(from as usize, to as usize, node.inner.inner.clone());
         });
     }
 
@@ -653,7 +671,7 @@ impl Transform_ {
         let to = to.map(|t| t as usize).unwrap_or(from as usize);
         self.schema.with_types(|| {
             self.inner
-                .set_block_type(from as usize, to, type_.inner, attrs);
+                .set_block_type(from as usize, to, type_.inner.inner, attrs);
         });
     }
 
@@ -665,11 +683,11 @@ impl Transform_ {
         attrs: Option<Value>,
         marks: Option<Vec<&Mark_>>,
     ) {
-        let marks =
-            marks.map(|m| MarkSet::from_vec(m.iter().map(|mark| mark.inner.clone()).collect()));
+        let marks = marks
+            .map(|m| MarkSet::from_vec(m.iter().map(|mark| mark.inner.inner.clone()).collect()));
         self.schema.with_types(|| {
             self.inner
-                .set_node_markup(pos as usize, type_.map(|t| t.inner), attrs, marks);
+                .set_node_markup(pos as usize, type_.map(|t| t.inner.inner), attrs, marks);
         });
     }
 
@@ -719,6 +737,7 @@ impl Transform_ {
 pub fn lift_target(range: &crate::model::NodeRange_) -> Option<u32> {
     let node_range = range.to_node_range()?;
     range
+        .inner
         .schema
         .with_types(|| rs_lift_target(&node_range))
         .map(|t| t as u32)
@@ -731,9 +750,9 @@ pub fn find_wrapping(
     _attrs: Option<Value>,
 ) -> Option<Vec<Value>> {
     let node_range = range.to_node_range()?;
-    let schema = range.schema.clone();
+    let schema = range.inner.schema.clone();
     schema.with_types(|| {
-        rs_find_wrapping(&node_range, node_type.inner, |_nt| true).map(|wrappers| {
+        rs_find_wrapping(&node_range, node_type.inner.inner, |_nt| true).map(|wrappers| {
             wrappers
                 .into_iter()
                 .map(|w| {
@@ -759,6 +778,7 @@ pub fn can_split(doc: &Node_, pos: u32, depth: Option<u32>, types: Option<Vec<Va
                     .unwrap_or("")
                     .to_string();
                 let node_type = doc
+                    .inner
                     .schema
                     .node_type_map
                     .get(&type_name)
@@ -769,9 +789,9 @@ pub fn can_split(doc: &Node_, pos: u32, depth: Option<u32>, types: Option<Vec<Va
             })
             .collect()
     });
-    doc.schema.with_types(|| {
+    doc.inner.schema.with_types(|| {
         rs_can_split::<Dyn>(
-            &doc.inner,
+            &doc.inner.inner,
             pos as usize,
             depth.map(|d| d as usize),
             types.as_ref().map(|v| v.as_slice()),
@@ -781,28 +801,34 @@ pub fn can_split(doc: &Node_, pos: u32, depth: Option<u32>, types: Option<Vec<Va
 
 #[napi]
 pub fn can_join(doc: &Node_, pos: u32) -> bool {
-    doc.schema
-        .with_types(|| rs_can_join::<Dyn>(&doc.inner, pos as usize))
+    doc.inner
+        .schema
+        .with_types(|| rs_can_join::<Dyn>(&doc.inner.inner, pos as usize))
         .unwrap_or(false)
 }
 
 #[napi]
 pub fn join_point(doc: &Node_, pos: u32, dir: Option<i32>) -> Option<u32> {
-    doc.schema
-        .with_types(|| rs_join_point::<Dyn>(&doc.inner, pos as usize, dir))
+    doc.inner
+        .schema
+        .with_types(|| rs_join_point::<Dyn>(&doc.inner.inner, pos as usize, dir))
         .map(|p| p as u32)
 }
 
 #[napi]
 pub fn insert_point(doc: &Node_, pos: u32, node_type: &crate::model::NodeType_) -> Option<u32> {
-    doc.schema
-        .with_types(|| rs_insert_point::<Dyn>(&doc.inner, pos as usize, node_type.inner))
+    doc.inner
+        .schema
+        .with_types(|| {
+            rs_insert_point::<Dyn>(&doc.inner.inner, pos as usize, node_type.inner.inner)
+        })
         .map(|p| p as u32)
 }
 
 #[napi]
 pub fn drop_point(doc: &Node_, pos: u32, slice: &Slice_) -> Option<u32> {
-    doc.schema
-        .with_types(|| rs_drop_point::<Dyn>(&doc.inner, pos as usize, &slice.inner))
+    doc.inner
+        .schema
+        .with_types(|| rs_drop_point::<Dyn>(&doc.inner.inner, pos as usize, &slice.inner.inner))
         .map(|p| p as u32)
 }

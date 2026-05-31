@@ -331,20 +331,21 @@ impl<S: Schema> Fragment<S> {
 
     /// Invoke a callback for all descendant nodes between the given two positions (relative to
     /// start of this fragment). Doesn't descend into a node when the callback returns `false`.
-    pub fn nodes_between<F: FnMut(&S::Node, usize) -> bool>(
+    pub fn nodes_between<F: FnMut(&S::Node, usize, Option<&S::Node>, usize) -> bool>(
         &self,
         from: usize,
         to: usize,
         f: &mut F,
         node_start: usize,
+        parent: Option<&S::Node>,
     ) {
         let mut pos = 0;
-        for child in &self.inner {
+        for (index, child) in self.inner.iter().enumerate() {
             let end = pos + child.node_size();
             if pos >= to {
                 break;
             }
-            if end > from && f(child, node_start + pos) {
+            if end > from && f(child, node_start + pos, parent, index) {
                 if let Some(content) = child.content() {
                     let start = pos + 1;
                     content.nodes_between(
@@ -352,6 +353,7 @@ impl<S: Schema> Fragment<S> {
                         content.size().min(to.saturating_sub(start)),
                         f,
                         node_start + start,
+                        Some(child),
                     )
                 }
             }
@@ -374,7 +376,7 @@ impl<S: Schema> Fragment<S> {
         self.nodes_between(
             from,
             to,
-            &mut move |node, pos| {
+            &mut move |node, pos, _parent, _index| {
                 if let Some(txt_node) = node.text_node() {
                     let txt = &txt_node.text;
                     let (rest, skip) = if from > pos {
@@ -401,9 +403,9 @@ impl<S: Schema> Fragment<S> {
                 true
             },
             0,
+            None,
         )
     }
-
     /// Create a new fragment in which the node at the given index is replaced by the given node.
     pub fn replace_child(&self, index: usize, node: S::Node) -> Cow<'_, Self> {
         let (before, rest) = self.inner.split_at(index);

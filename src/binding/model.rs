@@ -454,10 +454,10 @@ impl BFragment {
         &self,
         from: usize,
         to: usize,
-        f: &mut impl FnMut(&DynamicNode, usize) -> bool,
+        f: &mut impl FnMut(&DynamicNode, usize, Option<&DynamicNode>, usize) -> bool,
     ) {
         self.schema
-            .with_types(|| self.inner.nodes_between(from, to, f, 0));
+            .with_types(|| self.inner.nodes_between(from, to, f, 0, None));
     }
 }
 
@@ -796,13 +796,16 @@ impl BNode {
         &self,
         from: usize,
         to: usize,
-        f: &mut impl FnMut(&DynamicNode, usize) -> bool,
+        f: &mut impl FnMut(&DynamicNode, usize, Option<&DynamicNode>, usize) -> bool,
     ) {
         self.schema
             .with_types(|| <DynamicNode as Node<Dyn>>::nodes_between(&self.inner, from, to, f, 0));
     }
 
-    pub fn descendants(&self, f: &mut impl FnMut(&DynamicNode, usize) -> bool) {
+    pub fn descendants(
+        &self,
+        f: &mut impl FnMut(&DynamicNode, usize, Option<&DynamicNode>, usize) -> bool,
+    ) {
         self.schema
             .with_types(|| <DynamicNode as Node<Dyn>>::descendants(&self.inner, f));
     }

@@ -546,7 +546,7 @@ impl PyTransform {
                         this.inner.doc.nodes_between(
                             from,
                             to,
-                            &mut |node, _pos| {
+                            &mut |node, _pos, _parent, _index| {
                                 if let Some(node_marks) = node.marks() {
                                     for m in node_marks.iter() {
                                         if m.r#type().idx == target_idx {
@@ -808,7 +808,7 @@ impl PyTransform {
                     content.nodes_between(
                         from,
                         to,
-                        &mut |node: &DynamicNode, pos: usize| {
+                        &mut |node: &DynamicNode, pos: usize, _parent, _index| {
                             if node.is_textblock() {
                                 nodes.push((pos, node.clone()));
                                 return false;
@@ -816,6 +816,7 @@ impl PyTransform {
                             true
                         },
                         0,
+                        None,
                     );
                 }
             });
