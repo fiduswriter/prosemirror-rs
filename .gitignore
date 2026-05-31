@@ -12,7 +12,7 @@ node/npm/wasm/prosemirror_rs_wasm_bg.js
 node/npm/wasm/prosemirror_rs_wasm.d.ts
 node/npm/wasm/prosemirror_rs_wasm_bg.wasm.d.ts
 node/npm/wasm/package.json
-node/npm/wasm-nodejs/
+
 node/.upstream-tests/
 __pycache__/
 *.pyc

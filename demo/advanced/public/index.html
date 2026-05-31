@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>prosemirror-rs Advanced Demo</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>prosemirror-rs Advanced Demo</h1>
+    <p>
+      Two editors running on <strong>prosemirror-rs</strong> (WASM) with simulated
+      real-time collaboration, tables, lists, and history.
+    </p>
+    <div class="editors">
+      <div class="editor-pane">
+        <h2>Editor A</h2>
+        <div id="editor-a"></div>
+      </div>
+      <div class="editor-pane">
+        <h2>Editor B</h2>
+        <div id="editor-b"></div>
+      </div>
+    </div>
+    <div id="status"></div>
+  </div>
+  <script type="module" src="bundle.js"></script>
+</body>
+</html>

@@ -36,7 +36,8 @@ if (!binding) {
 const patch = require("../patch");
 patch.patchStatics(binding);
 
-// Merge DOM types (ReplaceError, DOMSerializer, etc.)
+// Merge DOM types (ReplaceError, DOMSerializer, DOMParser)
 const dom = require("../dom");
+const domTypes = dom.createDOMTypes(binding);
 
-module.exports = { ...binding, ...dom, ...patch };
+module.exports = { ...binding, ...domTypes, ...patch };

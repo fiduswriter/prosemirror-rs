@@ -1,0 +1,87 @@
+name: Deploy Demos to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM bindings
+        working-directory: node
+        run: npm run build:wasm
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install demo dependencies (basic)
+        working-directory: demo/basic
+        run: npm install
+
+      - name: Build basic demo
+        working-directory: demo/basic
+        run: npx rspack build
+
+      - name: Install demo dependencies (advanced)
+        working-directory: demo/advanced
+        run: npm install
+
+      - name: Build advanced demo
+        working-directory: demo/advanced
+        run: npx rspack build
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp demo/index.html _site/index.html
+          cp -r demo/basic/dist _site/basic
+          cp -r demo/advanced/dist _site/advanced
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

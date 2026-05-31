@@ -2,8 +2,10 @@
 
 // DOM-related types from prosemirror-model.
 // These are pure JavaScript — they use browser DOM APIs and cannot be
-// implemented in Rust.  They will be compiled from the vendored TypeScript
-// sources in vendor/ (Step 3.2 of the plan).
+// implemented in Rust.
+
+const { createDOMSerializer } = require("./to-dom.js");
+const { createDOMParser } = require("./from-dom.js");
 
 class ReplaceError extends Error {
   constructor(message) {
@@ -12,8 +14,12 @@ class ReplaceError extends Error {
   }
 }
 
-module.exports = {
-  ReplaceError,
-  // DOMSerializer, DOMParser, DOMOutputSpec, ParseRule, etc.
-  // — compiled separately from vendor/to-dom.ts and vendor/from-dom.ts
-};
+function createDOMTypes(binding) {
+  return {
+    ReplaceError,
+    DOMSerializer: createDOMSerializer(binding),
+    DOMParser: createDOMParser(binding),
+  };
+}
+
+module.exports = { ReplaceError, createDOMTypes };

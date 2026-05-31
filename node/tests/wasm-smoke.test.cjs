@@ -2,7 +2,7 @@
 /**
  * Smoke test for the WASM back-end of prosemirror-rs.
  *
- * Uses the wasm-bindgen native API (snake_case methods, Schema-first
+ * Uses the wasm-bindgen native API (camelCase methods, Schema-first
  * factory methods for Fragment, etc.).
  *
  * Run via:  node --test tests/wasm-smoke.test.cjs
@@ -33,29 +33,29 @@ test("Schema construction", () => {
   assert.ok(nodes.paragraph);
 });
 
-test("Document creation via Fragment.from_array", () => {
+test("Document creation via Fragment.fromArray", () => {
   const s = makeSchema();
   const text = s.text("hello", []);
-  const paraFrag = pm.Fragment.from_array(s, [text]);
+  const paraFrag = pm.Fragment.fromArray(s, [text]);
   const para = s.node("paragraph", null, paraFrag, []);
   assert.equal(para.type.name, "paragraph");
 
-  const docFrag = pm.Fragment.from_array(s, [para]);
+  const docFrag = pm.Fragment.fromArray(s, [para]);
   const doc = s.node("doc", null, docFrag, []);
-  assert.equal(doc.text_content, "hello");
-  assert.equal(doc.child_count, 1);
+  assert.equal(doc.textContent, "hello");
+  assert.equal(doc.childCount, 1);
 });
 
 test("nodesBetween traversal", () => {
   const s = makeSchema();
   const text = s.text("hey", []);
-  const pf = pm.Fragment.from_array(s, [text]);
+  const pf = pm.Fragment.fromArray(s, [text]);
   const para = s.node("paragraph", null, pf, []);
-  const df = pm.Fragment.from_array(s, [para]);
+  const df = pm.Fragment.fromArray(s, [para]);
   const doc = s.node("doc", null, df, []);
 
   const visited = [];
-  doc.nodes_between(0, doc.content.size, (node, _pos, _parent, _index) => {
+  doc.nodesBetween(0, doc.content.size, (node, _pos, _parent, _index) => {
     visited.push(node.type.name);
     return true;
   });
@@ -68,22 +68,22 @@ test("Fragment.from polymorphic", () => {
   assert.equal(empty.size, 0);
 
   const text = s.text("hi", []);
-  const f = pm.Fragment.from_array(s, [text]);
-  assert.equal(f.child_count, 1);
+  const f = pm.Fragment.fromArray(s, [text]);
+  assert.equal(f.childCount, 1);
 });
 
 test("ContentMatch", () => {
   const s = makeSchema();
-  const cm = s.nodes().paragraph.content_match();
-  assert.equal(cm.valid_end, true);
+  const cm = s.nodes().paragraph.contentMatch();
+  assert.equal(cm.validEnd, true);
 });
 
 test("ResolvedPos", () => {
   const s = makeSchema();
   const text = s.text("hi", []);
-  const pf = pm.Fragment.from_array(s, [text]);
+  const pf = pm.Fragment.fromArray(s, [text]);
   const para = s.node("paragraph", null, pf, []);
-  const df = pm.Fragment.from_array(s, [para]);
+  const df = pm.Fragment.fromArray(s, [para]);
   const doc = s.node("doc", null, df, []);
   const rp = doc.resolve(1);
   assert.ok(rp.pos >= 1);
@@ -106,22 +106,22 @@ test("Mapping", () => {
 test("Transform", () => {
   const s = makeSchema();
   const text = s.text("hi", []);
-  const pf = pm.Fragment.from_array(s, [text]);
+  const pf = pm.Fragment.fromArray(s, [text]);
   const para = s.node("paragraph", null, pf, []);
-  const df = pm.Fragment.from_array(s, [para]);
+  const df = pm.Fragment.fromArray(s, [para]);
   const doc = s.node("doc", null, df, []);
   const tr = new pm.Transform_(doc);
   assert.ok(tr);
-  assert.equal(tr.doc.text_content, "hi");
+  assert.equal(tr.doc.textContent, "hi");
 });
 
 test("Free functions", () => {
   const s = makeSchema();
   const t1 = s.text("hello", []);
   const t2 = s.text("world", []);
-  const p1 = s.node("paragraph", null, pm.Fragment.from_array(s, [t1]), []);
-  const p2 = s.node("paragraph", null, pm.Fragment.from_array(s, [t2]), []);
-  const doc = s.node("doc", null, pm.Fragment.from_array(s, [p1, p2]), []);
+  const p1 = s.node("paragraph", null, pm.Fragment.fromArray(s, [t1]), []);
+  const p2 = s.node("paragraph", null, pm.Fragment.fromArray(s, [t2]), []);
+  const doc = s.node("doc", null, pm.Fragment.fromArray(s, [p1, p2]), []);
   const jp = pm.joinPoint(doc, 7);
   assert.ok(typeof jp === "number" || jp === undefined);
 });
