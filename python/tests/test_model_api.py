@@ -238,6 +238,32 @@ class TestFragment:
         frag.for_each(lambda node, _offset, _index: texts.append(node.text))
         assert texts == ["a", "b", "c"]
 
+    def test_nodes_between_return_false_skips_children(self):
+        """Fragment.nodesBetween — returning False skips children."""
+        nested_doc = SCHEMA.node(
+            "doc",
+            None,
+            [
+                SCHEMA.node(
+                    "blockquote",
+                    None,
+                    [SCHEMA.node("paragraph", None, [SCHEMA.text("hello")])],
+                )
+            ],
+        )
+        frag = nested_doc.content
+        visited = []
+
+        def callback(node, _pos, _parent, _index):
+            visited.append(node.type.name)
+            if node.type.name == "blockquote":
+                return False
+            return True
+
+        frag.nodes_between(0, frag.size, callback)
+        assert "blockquote" in visited
+        assert "paragraph" not in visited
+
 
 # ---------------------------------------------------------------------------
 # Slice
@@ -340,6 +366,66 @@ class TestNode:
         seen = []
         doc.descendants(lambda node, pos, parent, index: seen.append(node.type.name))
         assert "paragraph" in seen
+
+    # -- nodesBetween / descendants early-termination --------------------
+
+    @staticmethod
+    def _nested_doc():
+        """doc > blockquote > paragraph > text — nested enough for skip tests."""
+        return SCHEMA.node(
+            "doc",
+            None,
+            [
+                SCHEMA.node(
+                    "blockquote",
+                    None,
+                    [SCHEMA.node("paragraph", None, [SCHEMA.text("hello")])],
+                )
+            ],
+        )
+
+    def test_nodes_between_return_false_skips_children(self):
+        doc = self._nested_doc()
+        visited = []
+
+        def callback(node, _pos, _parent, _index):
+            visited.append(node.type.name)
+            if node.type.name == "blockquote":
+                return False  # don't descend
+            return True
+
+        doc.nodes_between(0, doc.content.size, callback)
+        assert "blockquote" in visited
+        assert "paragraph" not in visited
+        assert "text" not in visited
+
+    def test_nodes_between_return_true_recurses_normally(self):
+        doc = self._nested_doc()
+        visited = []
+
+        def callback(node, _pos, _parent, _index):
+            visited.append(node.type.name)
+            return True
+
+        doc.nodes_between(0, doc.content.size, callback)
+        assert "blockquote" in visited
+        assert "paragraph" in visited
+        assert "text" in visited
+
+    def test_descendants_return_false_skips_children(self):
+        doc = self._nested_doc()
+        visited = []
+
+        def callback(node, _pos, _parent, _index):
+            visited.append(node.type.name)
+            if node.type.name == "blockquote":
+                return False
+            return True
+
+        doc.descendants(callback)
+        assert "blockquote" in visited
+        assert "paragraph" not in visited
+        assert "text" not in visited
 
 
 # ---------------------------------------------------------------------------
