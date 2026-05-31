@@ -1626,10 +1626,14 @@ impl ContentMatch {
 // ---------------------------------------------------------------------------
 
 /// Parse a content expression string into a ContentMatch.
+///
+/// `node_types` should be an object where each key is a node type name
+/// and each value is either a plain object with a `group` property (e.g.
+/// `{group: "block"}`) or a NodeType instance with a `spec()` method.
 #[wasm_bindgen]
 pub fn content_match_parse(expr: &str, node_types: &Object) -> Result<ContentMatch, JsValue> {
-    // We need a schema. Build a minimal one from the node_types object.
-    // First, extract node type names from the object.
+    // Build a minimal schema from the node_types object.
+    // Extract node type names and group info from the values.
     let keys = Object::keys(node_types);
     let mut nodes_map = serde_json::Map::new();
 
@@ -1637,8 +1641,18 @@ pub fn content_match_parse(expr: &str, node_types: &Object) -> Result<ContentMat
         let key_str: String = key
             .as_string()
             .ok_or_else(|| JsValue::from_str("node_types keys must be strings"))?;
-        // Use a minimal spec for each node type
-        nodes_map.insert(key_str, serde_json::json!({"content": "", "group": ""}));
+
+        // Try to extract group info from the value's .group property
+        let mut group = String::new();
+        if let Ok(val) = Reflect::get(node_types, &key) {
+            if let Ok(group_val) = Reflect::get(&val, &JsValue::from_str("group")) {
+                if let Some(g) = group_val.as_string() {
+                    group = g;
+                }
+            }
+        }
+
+        nodes_map.insert(key_str, serde_json::json!({"content": "", "group": group}));
     }
 
     let spec = serde_json::json!({

@@ -47,12 +47,12 @@ function DocAttrStep(attr, value) {
 }
 DocAttrStep.prototype = wasm.Step_.prototype;
 
-// Step.apply shim
+// Step.apply shim — the WASM apply already returns {doc, failed}.
+// We just catch errors thrown by the WASM function.
 const origStepApply = wasm.Step_.prototype.apply;
 wasm.Step_.prototype.apply = function (doc) {
   try {
-    const result = origStepApply.call(this, doc);
-    return { doc: result, failed: null };
+    return origStepApply.call(this, doc);
   } catch (e) {
     return { doc: null, failed: e.message };
   }

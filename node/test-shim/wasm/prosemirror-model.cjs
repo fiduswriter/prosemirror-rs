@@ -19,6 +19,11 @@ function BridgedSchema(spec) {
 BridgedSchema.prototype = Object.create(OrigSchema.prototype);
 
 // nodes / marks as getters (wasm has methods)
+// Also proxy __wbg_ptr so WASM interop sees the underlying pointer
+Object.defineProperty(BridgedSchema.prototype, "__wbg_ptr", {
+  get() { return this._wasm ? this._wasm.__wbg_ptr : undefined; },
+  configurable: true,
+});
 Object.defineProperty(BridgedSchema.prototype, "nodes", {
   get() { return this._wasm.nodes(); },
   configurable: true,
@@ -32,11 +37,14 @@ Object.defineProperty(BridgedSchema.prototype, "topNodeType", {
   configurable: true,
 });
 
-// node: accepts arrays as content (converts to Fragment)
+// node: accepts arrays as content (converts to Fragment), also handles single Node
 BridgedSchema.prototype.node = function (typeName, attrs, content, marks) {
   let frag = content;
   if (Array.isArray(content)) {
     frag = wasm.Fragment.from_array(this._wasm, content);
+  } else if (content != null && typeof content === 'object' && content.type) {
+    // Single Node — wrap in Fragment
+    frag = wasm.Fragment.from_array(this._wasm, [content]);
   } else if (content == null) {
     frag = null;
   }
@@ -44,8 +52,16 @@ BridgedSchema.prototype.node = function (typeName, attrs, content, marks) {
   let wasmMarks = marks || [];
   if (Array.isArray(wasmMarks)) {
     wasmMarks = wasmMarks.map(m => {
-      if (m && m.type && m.type.name) {
-        return this._wasm.mark(m.type.name, m.attrs || null);
+      if (!m) return m;
+      // Try to get type name from both napi (m.type.name) and WASM (m.type_)
+      const typeObj = m.type || m.type_;
+      if (typeObj && typeObj.name) {
+        const attrs = typeof m.attrs === 'function' ? m.attrs() : (m.attrs || null);
+        return this._wasm.mark(typeObj.name, attrs);
+      }
+      // If it's already a WASM Mark with a valid pointer, keep it
+      if (typeof m.__wbg_ptr === 'number' && m.__wbg_ptr > 0) {
+        return m;
       }
       return m;
     });
@@ -60,9 +76,13 @@ BridgedSchema.prototype.text = function (text, marks) {
   // Always recreate marks from type info to avoid dangling WASM pointers
   const wasmMarks = [];
   for (const m of marks) {
-    if (m && m.type && m.type.name) {
-      wasmMarks.push(this._wasm.mark(m.type.name, m.attrs || null));
-    } else if (m && typeof m.__wbg_ptr === 'number' && m.__wbg_ptr > 0) {
+    if (!m) continue;
+    // Try to get type name from both napi (m.type.name) and WASM (m.type_)
+    const typeObj = m.type || m.type_;
+    if (typeObj && typeObj.name) {
+      const attrs = typeof m.attrs === 'function' ? m.attrs() : (m.attrs || null);
+      wasmMarks.push(this._wasm.mark(typeObj.name, attrs));
+    } else if (typeof m.__wbg_ptr === 'number' && m.__wbg_ptr > 0) {
       wasmMarks.push(m);
     }
   }
@@ -74,13 +94,15 @@ BridgedSchema.prototype.mark = function (typeName, attrs) {
   return this._wasm.mark(typeName, attrs || null);
 };
 
-// nodeFromJson / markFromJson
+// nodeFromJson / markFromJson — tests call nodeFromJSON/markFromJSON (camelCase)
 BridgedSchema.prototype.nodeFromJson = function (json) {
   return this._wasm.node_from_json(json);
 };
+BridgedSchema.prototype.nodeFromJSON = BridgedSchema.prototype.nodeFromJson;
 BridgedSchema.prototype.markFromJson = function (json) {
   return this._wasm.mark_from_json(json);
 };
+BridgedSchema.prototype.markFromJSON = BridgedSchema.prototype.markFromJson;
 
 // Static fromJSON
 OrigSchema.fromJSON = function (spec) {
@@ -96,6 +118,8 @@ const origSchemaNode = OrigSchema.prototype.node;
 OrigSchema.prototype.node = function (typeName, attrs, content, marks) {
   let frag = content;
   if (Array.isArray(content)) frag = OrigFragment.from_array(this, content);
+  else if (content != null && typeof content === 'object' && content.type)
+    frag = OrigFragment.from_array(this, [content]);
   return origSchemaNode.call(this, typeName, attrs, frag || null, marks || []);
 };
 
@@ -107,12 +131,34 @@ if (OrigNodeType && OrigNodeType.prototype) {
     OrigNodeType.prototype.create = function (attrs, content, marks) {
       let frag = content;
       if (Array.isArray(content)) {
-        const s = this.schema; // NodeType.schema returns raw WASM Schema
+        const s = this.schema;
         frag = OrigFragment.from_array(s, content);
+      } else if (content != null && typeof content === 'object' && content.type) {
+        const s = this.schema;
+        frag = OrigFragment.from_array(s, [content]);
       }
       return origCreate.call(this, attrs, frag || null, marks || []);
     };
   }
+  // Also patch createChecked and createAndFill
+  ['create_checked', 'create_and_fill'].forEach(method => {
+    const orig = OrigNodeType.prototype[method];
+    if (orig) {
+      OrigNodeType.prototype[method] = function (attrs, content, marks) {
+        let frag = content;
+        if (Array.isArray(content)) {
+          const s = this.schema;
+          frag = OrigFragment.from_array(s, content);
+        } else if (content != null && typeof content === 'object' && content.type) {
+          const s = this.schema;
+          frag = OrigFragment.from_array(s, [content]);
+        } else if (content == null) {
+          frag = null;
+        }
+        return orig.call(this, attrs, frag, marks || []);
+      };
+    }
+  });
 }
 
 // rawSpec storage
@@ -143,7 +189,11 @@ Object.defineProperty(BridgedSchema.prototype, "spec", {
         forEach(fn) { Object.keys(base).forEach(k => fn(k, base[k])); },
         append(map) {
           const merged = Object.assign({}, base);
-          if (map && map.forEach) map.forEach((v, k) => { merged[k] = v; });
+          if (map && typeof map.forEach === 'function') {
+            map.forEach((v, k) => { merged[k] = v; });
+          } else if (map && typeof map === 'object') {
+            Object.assign(merged, map);
+          }
           return makeNodes(merged);
         },
         toJSON() { return base; },
@@ -161,7 +211,11 @@ Object.defineProperty(BridgedSchema.prototype, "spec", {
         forEach(fn) { Object.keys(base).forEach(k => fn(k, base[k])); },
         append(map) {
           const merged = Object.assign({}, base);
-          if (map && map.forEach) map.forEach((v, k) => { merged[k] = v; });
+          if (map && typeof map.forEach === 'function') {
+            map.forEach((v, k) => { merged[k] = v; });
+          } else if (map && typeof map === 'object') {
+            Object.assign(merged, map);
+          }
           return makeMarks(merged);
         },
         toJSON() { return base; },
@@ -183,17 +237,54 @@ const OrigFragment = wasm.Fragment;
 const origFragmentFrom = OrigFragment.from.bind(OrigFragment);
 const origFragmentFromArray = OrigFragment.from_array.bind(OrigFragment);
 
-// Fragment.from: bridge to accept JS arrays by wrapping in
-// BridgedSchema.getWasmSchema lookup
+// CamelCase aliases for Fragment methods
+if (OrigFragment && OrigFragment.prototype) {
+  const fragMethods = [
+    ["findDiffStart", "find_diff_start"],
+    ["findDiffEnd", "find_diff_end"],
+  ];
+  for (const [camel, snake] of fragMethods) {
+    if (!OrigFragment.prototype[camel] && typeof OrigFragment.prototype[snake] === "function") {
+      OrigFragment.prototype[camel] = OrigFragment.prototype[snake];
+    }
+  }
+}
+
+// Fragment.from: bridge the JS API to the WASM API.
+// JS: Fragment.from(schema) → empty frag
+// JS: Fragment.from(node) → frag from single node
+// JS: Fragment.from(nodes[]) → frag from array
+// WASM: Fragment.from(schema) → empty frag (original)
+// WASM: Fragment.from_array(schema, nodes[]) → frag from array
 OrigFragment.from = function (input, schema) {
+  // Case 1: null/undefined → empty fragment (need schema)
   if (input == null) {
-    // need schema for empty fragment — try to find one
     const s = schema || (OrigFragment._lastSchema);
     return s ? origFragmentFromArray(s, []) : origFragmentFrom(input);
   }
+  // Case 2: array of nodes (including empty array)
   if (Array.isArray(input)) {
     const s = schema || (OrigFragment._lastSchema);
     if (s) return origFragmentFromArray(s, input);
+    // Fallback: extract schema from first node
+    if (input.length > 0 && input[0] && input[0].type && input[0].type.schema) {
+      return origFragmentFromArray(input[0].type.schema, input);
+    }
+    // Empty array with no schema — need a fallback
+    if (input.length === 0 && OrigFragment._lastSchema) {
+      return origFragmentFromArray(OrigFragment._lastSchema, []);
+    }
+  }
+  // Case 3: single Node → extract schema from node
+  if (input && typeof input === 'object' && input.type && input.type.schema) {
+    // Store schema for later use
+    OrigFragment._lastSchema = input.type.schema;
+    return origFragmentFromArray(input.type.schema, [input]);
+  }
+  // Case 4: Schema → empty fragment
+  // Store schema for later use
+  if (input && typeof input.nodes === 'function') {
+    OrigFragment._lastSchema = input;
   }
   return origFragmentFrom(input);
 };
@@ -204,6 +295,63 @@ OrigFragment.fromArray = function (nodes, schema) {
   return origFragmentFromArray(nodes);
 };
 OrigFragment._wasmBridged = true;
+
+// ---------------------------------------------------------------------------
+// Tag preservation — WASM Node objects lose JS properties when copied.
+// Tests attach .tag to nodes; we need to preserve it across operations.
+// ---------------------------------------------------------------------------
+const _nodeTags = new Map(); // ptr → tag
+
+// Hook Node creation to copy tags from source nodes
+const _origTransformConstructor = wasm.Transform_;
+const _origTransformProto = _origTransformConstructor.prototype;
+
+// Patch Transform to preserve tags from input doc
+const _origBeforeDesc = Object.getOwnPropertyDescriptor(_origTransformProto, 'before');
+const _origDocDesc = Object.getOwnPropertyDescriptor(_origTransformProto, 'doc');
+
+function _copyTags(src, dst) {
+  if (src && src.__wbg_ptr != null && _nodeTags.has(src.__wbg_ptr)) {
+    _nodeTags.set(dst.__wbg_ptr, _nodeTags.get(src.__wbg_ptr));
+  }
+}
+
+function _getTag(node) {
+  if (!node || node.__wbg_ptr == null) return undefined;
+  // Direct property (set by test builder)
+  if (node.hasOwnProperty && node.hasOwnProperty('tag')) return node.tag;
+  // Registry lookup
+  return _nodeTags.get(node.__wbg_ptr);
+}
+
+function _setTag(node, tag) {
+  if (!node) return;
+  // Set direct property
+  Object.defineProperty(node, 'tag', {
+    value: tag,
+    writable: true,
+    configurable: true,
+    enumerable: true,
+  });
+  // Also store in registry
+  if (node.__wbg_ptr != null) {
+    _nodeTags.set(node.__wbg_ptr, tag);
+  }
+}
+
+// Override tag setter on Node prototype to sync with registry
+if (wasm.Node && wasm.Node.prototype) {
+  // We can't override a non-existent setter, but we can track assignments
+  // via a proxy in the test builder. Instead, we'll monkey-patch the
+  // property assignment on Node instances done by the test builder.
+}
+
+// Patch Node constructor to intercept tag assignments
+const OrigNode = wasm.Node;
+if (OrigNode && OrigNode.prototype) {
+  // No constructor interception needed — we handle it in the tag getter/setter
+  // by checking the registry.
+}
 
 // ---------------------------------------------------------------------------
 // Node bridging
@@ -217,6 +365,38 @@ if (wasm.Node.prototype && wasm.Node.prototype.to_json) {
 // ---------------------------------------------------------------------------
 // CamelCase aliases for WASM snake_case METHODS (not getters)
 // ---------------------------------------------------------------------------
+
+// Helper: copy a property descriptor for camelCase aliases
+function _addCamelAlias(proto, camel, snake) {
+  if (camel in proto) return;
+  const desc = Object.getOwnPropertyDescriptor(proto, snake);
+  if (desc) {
+    Object.defineProperty(proto, camel, desc);
+  }
+}
+
+// Node getters (these are critical for the test builder)
+if (wasm.Node && wasm.Node.prototype) {
+  const nodeGetters = [
+    ["nodeSize", "node_size"],
+    ["childCount", "child_count"],
+    ["firstChild", "first_child"],
+    ["lastChild", "last_child"],
+    ["textContent", "text_content"],
+    ["inlineContent", "inline_content"],
+    ["isAtom", "is_atom"],
+    ["isBlock", "is_block"],
+    ["isInline", "is_inline"],
+    ["isLeaf", "is_leaf"],
+    ["isText", "is_text"],
+    ["isTextblock", "is_textblock"],
+  ];
+  for (const [camel, snake] of nodeGetters) {
+    _addCamelAlias(wasm.Node.prototype, camel, snake);
+  }
+  // type_ → type already handled
+  // toJSON already exists
+}
 
 // Mark methods
 if (wasm.Mark && wasm.Mark.prototype) {
@@ -259,6 +439,7 @@ if (wasm.Node && wasm.Node.prototype) {
     ["canReplace", "can_replace"], ["canReplaceWith", "can_replace_with"],
     ["hasMarkup", "has_markup"], ["childAfter", "child_after"],
     ["childBefore", "child_before"], ["nodeAt", "node_at"],
+    ["nodesBetween", "nodes_between"],
   ];
   for (const [camel, snake] of nodeMethods) {
     if (!wasm.Node.prototype[camel] && typeof wasm.Node.prototype[snake] === "function") {
@@ -269,6 +450,15 @@ if (wasm.Node && wasm.Node.prototype) {
 
 // ResolvedPos methods
 if (wasm.ResolvedPos && wasm.ResolvedPos.prototype) {
+  // marks: WASM has it as a getter, but tests call it as .marks()
+  const marksDesc = Object.getOwnPropertyDescriptor(wasm.ResolvedPos.prototype, 'marks');
+  if (marksDesc && marksDesc.get) {
+    Object.defineProperty(wasm.ResolvedPos.prototype, 'marks', {
+      value: function () { return marksDesc.get.call(this); },
+      configurable: true,
+      writable: true,
+    });
+  }
   if (!wasm.ResolvedPos.prototype.marksAcross && wasm.ResolvedPos.prototype.marks_across) {
     wasm.ResolvedPos.prototype.marksAcross = wasm.ResolvedPos.prototype.marks_across;
   }
@@ -277,6 +467,10 @@ if (wasm.ResolvedPos && wasm.ResolvedPos.prototype) {
   }
   if (!wasm.ResolvedPos.prototype.blockRange && wasm.ResolvedPos.prototype.block_range) {
     wasm.ResolvedPos.prototype.blockRange = wasm.ResolvedPos.prototype.block_range;
+  }
+  // posAtIndex is used by tests
+  if (!wasm.ResolvedPos.prototype.posAtIndex && wasm.ResolvedPos.prototype.pos_at_index) {
+    wasm.ResolvedPos.prototype.posAtIndex = wasm.ResolvedPos.prototype.pos_at_index;
   }
 }
 
@@ -310,8 +504,14 @@ if (wasm.NodeType && wasm.NodeType.prototype) {
 // ---------------------------------------------------------------------------
 if (wasm.Step_) {
   wasm.Step = wasm.Step_;
-  wasm.Step_.prototype.toJSON = wasm.Step_.prototype.to_json || wasm.Step_.prototype.toJson;
-  wasm.Step_.fromJSON = wasm.Step_.from_json || wasm.Step_.fromJson;
+  // toJSON already exists on Step_ prototype (it's a WASM-generated method).
+  // Only override it if it doesn't exist and a snake_case alias does.
+  if (!wasm.Step_.prototype.toJSON) {
+    wasm.Step_.prototype.toJSON = wasm.Step_.prototype.to_json || wasm.Step_.prototype.toJson;
+  }
+  if (!wasm.Step_.fromJSON) {
+    wasm.Step_.fromJSON = wasm.Step_.from_json || wasm.Step_.fromJson;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -321,14 +521,43 @@ if (wasm.Transform_) {
   const OrigTransform = wasm.Transform_;
   function BridgedTransform(doc) {
     if (!(this instanceof BridgedTransform)) return new BridgedTransform(doc);
-    return Reflect.construct(OrigTransform, [doc], new.target);
+    const tr = Reflect.construct(OrigTransform, [doc], new.target);
+
+    // Preserve tags from input doc across the WASM boundary.
+    // The Transform creates new WASM Node objects for before/doc,
+    // so JS properties like .tag set by the test builder are lost.
+    if (doc && doc.tag) {
+      // Override the 'before' getter on this instance to include the tag
+      const origBefore = Object.getOwnPropertyDescriptor(OrigTransform.prototype, 'before').get;
+      Object.defineProperty(tr, 'before', {
+        get() {
+          const node = origBefore.call(this);
+          if (node && !node.tag) {
+            Object.defineProperty(node, 'tag', {
+              value: doc.tag,
+              writable: true,
+              configurable: true,
+              enumerable: true,
+            });
+          }
+          return node;
+        },
+        configurable: true,
+      });
+    }
+
+    return tr;
   }
   BridgedTransform.prototype = OrigTransform.prototype;
 
-  // Chainable methods
+  // Chainable methods (all methods that modify the transform and return void)
   const chainMethods = [
-    "replace", "delete", "addMark", "addNodeMark", "setNodeMarkup",
-    "setNodeAttribute", "setDocAttribute", "step", "maybeStep",
+    "addMark", "addNodeMark", "clearIncompatible",
+    "delete", "deleteRange", "insert", "join", "lift",
+    "maybeStep", "removeMark", "removeMarkType", "removeNodeMark",
+    "removeNodeMarkType", "replace", "replaceRange", "replaceRangeWith",
+    "replaceWith", "setBlockType", "setDocAttribute", "setNodeAttribute",
+    "setNodeMarkup", "split", "step", "wrap",
   ];
   for (const name of chainMethods) {
     const orig = OrigTransform.prototype[name];
@@ -353,6 +582,50 @@ if (wasm.Mapping_) {
 // ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
+
+// Slice bridging — add camelCase aliases for snake_case getters/methods
+if (wasm.Slice && wasm.Slice.prototype) {
+  const sliceAliases = [
+    ['openStart', 'open_start'],
+    ['openEnd', 'open_end'],
+    ['toJSON', 'to_json'],
+  ];
+  for (const [camel, snake] of sliceAliases) {
+    if (!(camel in wasm.Slice.prototype) && (snake in wasm.Slice.prototype)) {
+      const desc = Object.getOwnPropertyDescriptor(wasm.Slice.prototype, snake);
+      if (desc) {
+        Object.defineProperty(wasm.Slice.prototype, camel, desc);
+      }
+    }
+  }
+}
+
+// Slice.empty static — creates an empty slice.
+// Tests use Slice.empty as a static property (not a function).
+if (wasm.Slice) {
+  // Override the existing Slice.empty function to also work as a static value.
+  // The WASM function takes a schema argument; the JS API uses it as a constant.
+  const origEmpty = wasm.Slice.empty;
+  if (typeof origEmpty === 'function') {
+    // Replace with a getter that returns an empty slice for the last schema
+    let _emptySlice = null;
+    let _lastSchemaForEmpty = null;
+    Object.defineProperty(wasm.Slice, 'empty', {
+      get() {
+        const s = OrigFragment._lastSchema;
+        if (!_emptySlice || _lastSchemaForEmpty !== s) {
+          if (s) {
+            _emptySlice = origEmpty(s);
+            _lastSchemaForEmpty = s;
+          }
+        }
+        return _emptySlice;
+      },
+      configurable: true,
+    });
+  }
+}
+
 module.exports = {
   Schema: BridgedSchema,
   Node: wasm.Node,
@@ -370,7 +643,7 @@ module.exports = {
   MapResult: wasm.MapResult_,
   Mapping: wasm.Mapping || wasm.Mapping_,
   // Free functions
-  contentMatchParse: wasm.contentMatchParse,
+
   canSplit: wasm.canSplit,
   canJoin: wasm.canJoin,
   joinPoint: wasm.joinPoint,
@@ -380,17 +653,33 @@ module.exports = {
   findWrapping: wasm.findWrapping,
 };
 
-// ContentMatch.parse static
-if (wasm.ContentMatch && !wasm.ContentMatch.parse && wasm.contentMatchParse) {
-  wasm.ContentMatch.parse = function (expr, nodeTypes) {
-    return wasm.contentMatchParse(expr, nodeTypes);
-  };
-}
-
-// Step.toJSON / Transform.toJSON
-if (wasm.Step_ && wasm.Step_.prototype) {
-  if (!wasm.Step_.prototype.toJSON && wasm.Step_.prototype.to_json) {
-    wasm.Step_.prototype.toJSON = wasm.Step_.prototype.to_json;
+// ContentMatch.parse static (WASM export is content_match_parse)
+if (wasm.ContentMatch && !wasm.ContentMatch.parse) {
+  const parseFn = wasm.contentMatchParse || wasm.content_match_parse;
+  if (parseFn) {
+    wasm.ContentMatch.parse = function (expr, nodeTypes) {
+      // Extract group info from NodeType values to pass to the Rust parser.
+      // The Rust code reads the .group property from each value.
+      const groups = {};
+      for (const key in nodeTypes) {
+        const val = nodeTypes[key];
+        let group = '';
+        if (val && typeof val === 'object') {
+          // Try direct .group property (from plain objects)
+          if (typeof val.group === 'string') {
+            group = val.group;
+          } else if (typeof val.spec === 'function') {
+            // NodeType has spec() method that returns a Map
+            const spec = val.spec();
+            if (spec && typeof spec.get === 'function') {
+              group = spec.get('group') || '';
+            }
+          }
+        }
+        groups[key] = { group };
+      }
+      return parseFn(expr, groups);
+    };
   }
 }
 
