@@ -172,6 +172,81 @@ impl BNodeType {
     pub fn allows_marks(&self, marks: &MarkSet<Dyn>) -> bool {
         self.schema.with_types(|| self.inner.allow_marks(marks))
     }
+
+    /// Whether the node type belongs to the named group.
+    pub fn is_in_group(&self, group: &str) -> bool {
+        self.schema.node_types[self.inner.idx]
+            .groups
+            .iter()
+            .any(|g| g == group)
+    }
+
+    /// The default attribute values for this node type, as a JSON object.
+    pub fn attrs_defaults(&self) -> Value {
+        let map: serde_json::Map<String, Value> = self.schema.node_types[self.inner.idx]
+            .attrs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        Value::Object(map)
+    }
+
+    /// The set of mark types this node type allows, as `BMarkType`s.
+    /// Returns `None` if all marks are allowed (i.e. `marks` spec was `"_"`).
+    pub fn mark_set(&self) -> Option<Vec<BMarkType>> {
+        let nt = &self.schema.node_types[self.inner.idx];
+        nt.allowed_marks.as_ref().map(|names| {
+            names
+                .iter()
+                .filter_map(|name| {
+                    let idx = self.schema.mark_type_map.get(name)?;
+                    Some(BMarkType {
+                        schema: self.schema.clone(),
+                        inner: DynamicMarkType { idx: *idx },
+                        name: name.clone(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+    }
+
+    /// Filter a set of marks to only those allowed by this node type.
+    pub fn allowed_marks_filtered(&self, marks: Vec<DynamicMark>) -> Vec<DynamicMark> {
+        let mark_set = MarkSet::<Dyn>::from_vec(marks);
+        self.schema.with_types(|| {
+            mark_set
+                .iter()
+                .filter(|m: &&DynamicMark| self.inner.allows_mark_type(m.r#type()))
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// Serialise the node-type spec as a JSON object (attrs, inline, atom, …).
+    pub fn spec_json(&self) -> Value {
+        let d = &self.schema.node_types[self.inner.idx];
+        let mut obj = serde_json::Map::new();
+        obj.insert("inline".into(), Value::Bool(d.inline));
+        obj.insert("atom".into(), Value::Bool(d.atom));
+        if let Some(ws) = &d.whitespace {
+            obj.insert("whitespace".into(), Value::String(ws.clone()));
+        }
+        obj.insert(
+            "group".into(),
+            if d.groups.is_empty() {
+                Value::Null
+            } else {
+                Value::String(d.groups.join(" "))
+            },
+        );
+        let attrs: serde_json::Map<String, Value> = d
+            .attrs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        obj.insert("attrs".into(), Value::Object(attrs));
+        Value::Object(obj)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +303,28 @@ impl BMarkType {
 
     pub fn excludes(&self, other: &BMarkType) -> bool {
         self.schema.with_types(|| self.inner.excludes(other.inner))
+    }
+
+    /// Serialise the mark-type spec as a JSON object (attrs, inclusive, …).
+    pub fn spec_json(&self) -> Value {
+        let d = &self.schema.mark_types[self.inner.idx];
+        let mut obj = serde_json::Map::new();
+        obj.insert("inclusive".into(), Value::Bool(d.inclusive));
+        obj.insert(
+            "group".into(),
+            if d.groups.is_empty() {
+                Value::Null
+            } else {
+                Value::String(d.groups.join(" "))
+            },
+        );
+        let attrs: serde_json::Map<String, Value> = d
+            .attrs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        obj.insert("attrs".into(), Value::Object(attrs));
+        Value::Object(obj)
     }
 }
 
@@ -296,6 +393,30 @@ impl BMark {
     pub fn eq(&self, other: &BMark) -> bool {
         self.inner == other.inner
     }
+
+    /// Test whether two mark sets are equal (same marks in the same order).
+    pub fn same_set(a: &[DynamicMark], b: &[DynamicMark]) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        a.iter().zip(b.iter()).all(|(x, y)| x == y)
+    }
+
+    /// Create a sorted, deduplicated mark set from a slice of marks.
+    pub fn set_from(schema: &Arc<DynamicSchema>, marks: Vec<DynamicMark>) -> Vec<DynamicMark> {
+        if marks.is_empty() {
+            return Vec::new();
+        }
+        // Add each mark to the set using ProseMirror's add_to_set logic to get
+        // the canonical sorted & deduplicated representation.
+        schema.with_types(|| {
+            let mut result = MarkSet::new();
+            for m in marks {
+                result = m.add_to_set(std::borrow::Cow::Owned(result)).into_owned();
+            }
+            result.iter().cloned().collect()
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +424,7 @@ impl BMark {
 // ---------------------------------------------------------------------------
 
 /// Common binding wrapper around `Fragment<Dyn>`.
+#[derive(Clone)]
 pub struct BFragment {
     pub schema: Arc<DynamicSchema>,
     pub inner: Fragment<Dyn>,
@@ -536,6 +658,7 @@ impl BSlice {
 // ---------------------------------------------------------------------------
 
 /// Common binding wrapper around `DynamicNode`.
+#[derive(Clone)]
 pub struct BNode {
     pub schema: Arc<DynamicSchema>,
     pub inner: DynamicNode,
@@ -808,6 +931,129 @@ impl BNode {
     ) {
         self.schema
             .with_types(|| <DynamicNode as Node<Dyn>>::descendants(&self.inner, f));
+    }
+
+    /// Test whether the node's type, attrs, and marks match a given combination.
+    /// `marks` is `None` to skip marks check, `Some(&[])` to check for empty marks.
+    pub fn has_markup(
+        &self,
+        type_: &BNodeType,
+        attrs: Option<&Value>,
+        marks: Option<&[DynamicMark]>,
+    ) -> bool {
+        if self.inner.type_name != type_.name {
+            return false;
+        }
+        if let Some(a) = attrs {
+            if &self.inner.attrs_json() != a {
+                return false;
+            }
+        }
+        if let Some(m) = marks {
+            let node_marks = self.marks_vec();
+            if node_marks.len() != m.len() {
+                return false;
+            }
+            if !node_marks.iter().zip(m.iter()).all(|(a, b)| a == b) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Returns `{node, index, offset}` of the child immediately after `pos`, or
+    /// `None` if no such child exists.  (`pos` is relative to this node.)
+    pub fn child_after(&self, pos: usize) -> Option<(BNode, usize, usize)> {
+        self.schema.with_types(|| {
+            let content = <DynamicNode as Node<Dyn>>::content(&self.inner)?;
+            let children = content.children();
+            let mut offset = 0usize;
+            for (i, child) in children.iter().enumerate() {
+                let end = offset + child.node_size();
+                if end > pos {
+                    return Some((
+                        BNode {
+                            schema: self.schema.clone(),
+                            inner: child.clone(),
+                        },
+                        i,
+                        offset,
+                    ));
+                }
+                offset = end;
+            }
+            None
+        })
+    }
+
+    /// Returns `{node, index, offset}` of the child immediately before `pos`, or
+    /// `None` if no such child exists.  (`pos` is relative to this node.)
+    pub fn child_before(&self, pos: usize) -> Option<(BNode, usize, usize)> {
+        self.schema.with_types(|| {
+            let content = <DynamicNode as Node<Dyn>>::content(&self.inner)?;
+            let children = content.children();
+            let mut offset = 0usize;
+            for (i, child) in children.iter().enumerate() {
+                let end = offset + child.node_size();
+                if end >= pos {
+                    if i == 0 {
+                        return None;
+                    }
+                    // go back one child
+                    let prev_child = &children[i - 1];
+                    let prev_offset = offset - prev_child.node_size();
+                    return Some((
+                        BNode {
+                            schema: self.schema.clone(),
+                            inner: prev_child.clone(),
+                        },
+                        i - 1,
+                        prev_offset,
+                    ));
+                }
+                offset = end;
+            }
+            // pos is after all children — return last child
+            if let Some(last) = children.last() {
+                let last_offset = offset - last.node_size();
+                Some((
+                    BNode {
+                        schema: self.schema.clone(),
+                        inner: last.clone(),
+                    },
+                    children.len() - 1,
+                    last_offset,
+                ))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Check whether the given fragment can replace the content at `from..to`
+    /// (child indices).  Optional `start`/`end` index into the replacement.
+    pub fn can_replace(
+        &self,
+        from: usize,
+        to: usize,
+        replacement: Option<&BFragment>,
+        start: usize,
+        end: Option<usize>,
+    ) -> bool {
+        self.schema.with_types(|| {
+            let frag = replacement.map(|r| &r.inner);
+            let end_idx = end.unwrap_or_else(|| frag.map(|f| f.child_count()).unwrap_or(0));
+            <DynamicNode as Node<Dyn>>::can_replace(&self.inner, from, to, frag, start..end_idx)
+                .unwrap_or(false)
+        })
+    }
+
+    /// Check whether a node of the given type (and optionally attrs) can replace
+    /// the content between `from` and `to` (child indices).
+    pub fn can_replace_with(&self, from: usize, to: usize, type_: &BNodeType) -> bool {
+        self.schema.with_types(|| {
+            <DynamicNode as Node<Dyn>>::can_replace_with(&self.inner, from, to, type_.inner)
+        })
     }
 }
 
@@ -1222,5 +1468,52 @@ impl BContentMatch {
                 inner: next,
             },
         ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Schema free functions
+// ---------------------------------------------------------------------------
+
+/// Return the top-level node type of a schema (the "doc" type by default).
+pub fn b_schema_top_node_type(schema: &Arc<DynamicSchema>) -> Option<BNodeType> {
+    let name = schema.top_node.clone();
+    let idx = *schema.node_type_map.get(&name)?;
+    Some(BNodeType {
+        schema: schema.clone(),
+        inner: DynamicNodeType { idx },
+        name,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Fragment::from  (polymorphic)
+// ---------------------------------------------------------------------------
+
+/// The input accepted by `Fragment.from()` in ProseMirror JS.
+pub enum FragmentFromInput {
+    /// `null` / `undefined` → empty fragment
+    Null,
+    /// A single node
+    SingleNode(BNode),
+    /// An array of nodes
+    NodeArray(Vec<DynamicNode>),
+    /// An existing fragment (cloned)
+    Fragment(BFragment),
+}
+
+/// Implement `Fragment.from(input)` — identical semantics to the JS original.
+pub fn b_fragment_from(schema: Arc<DynamicSchema>, input: FragmentFromInput) -> BFragment {
+    match input {
+        FragmentFromInput::Null => BFragment::empty(schema),
+        FragmentFromInput::SingleNode(n) => {
+            let inner = schema.with_types(|| Fragment::from_array(vec![n.inner]));
+            BFragment { schema, inner }
+        }
+        FragmentFromInput::NodeArray(nodes) => {
+            let inner = schema.with_types(|| Fragment::from_array(nodes));
+            BFragment { schema, inner }
+        }
+        FragmentFromInput::Fragment(f) => f,
     }
 }

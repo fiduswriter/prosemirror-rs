@@ -73,8 +73,8 @@ Same limitation as above specifically for Python's `nodes_between` and
 | `new Mapping(maps?)` | ❌ ctor | partial | |
 | `Mapping.appendMapping(m)` | ❌ | ❌ | |
 | `Mapping.appendMappingInverted(m)` | ❌ | ❌ | |
-| `Mapping.copy()` | ❌ | ❌ | |
-| `Transform.clearIncompatible(pos, type, attrs?)` | ❌ | ❌ | needs core impl |
+| `Mapping.copy()` | ✅ | ✅ | Node: `mapping.copy()` · Python: `mapping.copy()` |
+| `Transform.clearIncompatible(pos, type, attrs?)` | ✅ | ✅ | Node: `transform.clearIncompatible(pos, type, clearNewlines)` · Python: `transform.clear_incompatible(pos, type, clear_newlines)` |
 
 ---
 

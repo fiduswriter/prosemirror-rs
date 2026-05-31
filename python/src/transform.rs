@@ -182,6 +182,12 @@ impl PyMapping {
         }
     }
 
+    fn copy(&self) -> PyMapping {
+        PyMapping {
+            inner: self.inner.clone(),
+        }
+    }
+
     #[getter]
     fn maps(&self) -> Vec<PyStepMap> {
         self.inner
@@ -413,6 +419,31 @@ impl PyTransform {
 
     fn doc_changed(&self) -> bool {
         self.inner.doc_changed()
+    }
+
+    /// Return a deep copy of this mapping (mirrors `Mapping.copy` in the JS API).
+    fn copy_mapping(&self) -> PyMapping {
+        PyMapping {
+            inner: self.inner.mapping.clone(),
+        }
+    }
+
+    /// Remove content incompatible with `node_type` at `pos`.
+    fn clear_incompatible(
+        slf: &Bound<'_, Self>,
+        pos: usize,
+        node_type: &crate::model::PyNodeType,
+        clear_newlines: bool,
+    ) -> Py<Self> {
+        {
+            let mut this = slf.borrow_mut();
+            let schema = this.schema.clone();
+            let nt = node_type.inner.inner;
+            schema.with_types(|| {
+                this.inner.clear_incompatible(pos, nt, None, clear_newlines);
+            });
+        }
+        slf.clone().unbind()
     }
 
     fn step(slf: &Bound<'_, Self>, step: &PyStep) -> PyResult<Py<Self>> {

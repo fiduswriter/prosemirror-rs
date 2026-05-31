@@ -1043,7 +1043,7 @@ impl<S: Schema> Transform<S> {
     }
 
     /// Remove content that is not valid in the given parent type.
-    fn clear_incompatible(
+    pub fn clear_incompatible(
         &mut self,
         pos: usize,
         parent_type: S::NodeType,

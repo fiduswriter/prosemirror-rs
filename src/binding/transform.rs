@@ -203,6 +203,13 @@ impl BMapping {
         }
     }
 
+    /// Return a deep copy of this mapping.
+    pub fn copy(&self) -> BMapping {
+        BMapping {
+            inner: self.inner.clone(),
+        }
+    }
+
     /// Return a sub-mapping view.
     pub fn slice(&self, from: usize, to: Option<usize>) -> BMapping {
         BMapping {
@@ -622,6 +629,20 @@ impl BTransform {
     pub fn set_doc_attribute(&mut self, attr: String, value: Value) {
         let schema = Arc::clone(&self.schema);
         schema.with_types(|| self.inner.set_doc_attribute(&attr, value));
+    }
+
+    /// Remove content incompatible with the given node type at `pos`.
+    pub fn clear_incompatible(
+        &mut self,
+        pos: usize,
+        type_: &super::model::BNodeType,
+        clear_newlines: bool,
+    ) {
+        let schema = Arc::clone(&self.schema);
+        schema.with_types(|| {
+            self.inner
+                .clear_incompatible(pos, type_.inner, None, clear_newlines)
+        });
     }
 }
 

@@ -13,7 +13,8 @@ static SCHEMA_RAW_SPECS: std::sync::LazyLock<Mutex<HashMap<usize, Py<PyAny>>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 use prosemirror::binding::model::{
-    BContentMatch, BFragment, BMark, BMarkType, BNode, BNodeRange, BNodeType, BResolvedPos, BSlice,
+    b_fragment_from, b_schema_top_node_type, BContentMatch, BFragment, BMark, BMarkType, BNode,
+    BNodeRange, BNodeType, BResolvedPos, BSlice, FragmentFromInput,
 };
 use prosemirror::dynamic::types::{
     Dyn, DynamicMark, DynamicMarkType, DynamicNode, DynamicNodeType,
@@ -340,6 +341,13 @@ impl PySchema {
             },
         })
     }
+
+    #[getter]
+    fn top_node_type(&self) -> PyResult<PyNodeType> {
+        b_schema_top_node_type(&self.inner)
+            .map(|inner| PyNodeType { inner })
+            .ok_or_else(|| PyValueError::new_err("Unknown top node type"))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -497,6 +505,47 @@ impl PyNodeType {
         Ok(self.inner.allows_marks(&ms))
     }
 
+    fn is_in_group(&self, group: &str) -> bool {
+        self.inner.is_in_group(group)
+    }
+
+    #[getter]
+    fn attrs(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        json_to_py(py, &self.inner.attrs_defaults()).map(|b| b.unbind())
+    }
+
+    #[getter]
+    fn mark_set(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        match self.inner.mark_set() {
+            None => Ok(None),
+            Some(marks) => {
+                let list = PyList::new(py, marks.into_iter().map(|bmt| PyMarkType { inner: bmt }))?;
+                Ok(Some(list.into_any().unbind()))
+            }
+        }
+    }
+
+    fn allowed_marks(&self, marks: &Bound<'_, PyAny>) -> PyResult<Vec<PyMark>> {
+        let ms = extract_markset(marks)?;
+        let schema = self.inner.schema.clone();
+        Ok(self
+            .inner
+            .allowed_marks_filtered(ms.iter().cloned().collect())
+            .into_iter()
+            .map(|m| PyMark {
+                inner: BMark {
+                    schema: schema.clone(),
+                    inner: m,
+                },
+            })
+            .collect())
+    }
+
+    #[getter]
+    fn spec(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        json_to_py(py, &self.inner.spec_json()).map(|b| b.unbind())
+    }
+
     fn __str__(&self) -> String {
         self.inner.name.clone()
     }
@@ -561,6 +610,11 @@ impl PyMarkType {
 
     fn excludes(&self, other: &PyMarkType) -> bool {
         self.inner.excludes(&other.inner)
+    }
+
+    #[getter]
+    fn spec(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        json_to_py(py, &self.inner.spec_json()).map(|b| b.unbind())
     }
 
     fn __str__(&self) -> String {
@@ -643,6 +697,55 @@ impl PyMark {
     fn eq(&self, other: &Bound<'_, PyAny>) -> PyResult<bool> {
         let other = other.cast::<PyMark>()?.borrow();
         Ok(self.inner.eq(&other.inner))
+    }
+
+    #[staticmethod]
+    fn same_set(a: &Bound<'_, PyAny>, b: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let av: Vec<_> = if let Ok(list) = a.cast::<pyo3::types::PyList>() {
+            list.iter()
+                .map(|i| Ok(i.cast::<PyMark>()?.borrow().inner.inner.clone()))
+                .collect::<PyResult<Vec<_>>>()?
+        } else {
+            vec![]
+        };
+        let bv: Vec<_> = if let Ok(list) = b.cast::<pyo3::types::PyList>() {
+            list.iter()
+                .map(|i| Ok(i.cast::<PyMark>()?.borrow().inner.inner.clone()))
+                .collect::<PyResult<Vec<_>>>()?
+        } else {
+            vec![]
+        };
+        Ok(BMark::same_set(&av, &bv))
+    }
+
+    #[staticmethod]
+    fn set_from(schema: &PySchema, marks: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<PyMark>> {
+        let raw: Vec<_> = if let Some(marks) = marks {
+            if let Ok(list) = marks.cast::<pyo3::types::PyList>() {
+                list.iter()
+                    .map(|i| Ok(i.cast::<PyMark>()?.borrow().inner.inner.clone()))
+                    .collect::<PyResult<Vec<_>>>()?
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+        let s = schema.inner.clone();
+        Ok(BMark::set_from(&s, raw)
+            .into_iter()
+            .map(|m| PyMark {
+                inner: BMark {
+                    schema: s.clone(),
+                    inner: m,
+                },
+            })
+            .collect())
+    }
+
+    #[classattr]
+    fn none() -> Vec<PyMark> {
+        Vec::new()
     }
 
     fn __richcmp__(&self, other: &Bound<'_, PyAny>, op: pyo3::basic::CompareOp) -> PyResult<bool> {
@@ -750,6 +853,54 @@ impl PyFragment {
                 schema,
                 inner: frag,
             },
+        })
+    }
+
+    /// Polymorphic `Fragment.from(input)` — accepts null/None, a Node, a list
+    /// of Nodes, or an existing Fragment.
+    #[staticmethod]
+    #[pyo3(name = "from_")]
+    fn from_input(input: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        let schema;
+        let finput = match input {
+            None => {
+                return Ok(PyFragment::new());
+            }
+            Some(obj) if obj.is_none() => {
+                return Ok(PyFragment::new());
+            }
+            Some(obj) => {
+                if let Ok(f) = obj.cast::<PyFragment>() {
+                    return Ok(PyFragment {
+                        inner: f.borrow().inner.clone(),
+                    });
+                }
+                if let Ok(n) = obj.cast::<PyNode>() {
+                    schema = n.borrow().inner.schema.clone();
+                    let node = n.borrow().inner.clone();
+                    FragmentFromInput::SingleNode(node)
+                } else if let Ok(list) = obj.cast::<PyList>() {
+                    let mut nodes = Vec::new();
+                    let mut s: Option<Arc<DynamicSchema>> = None;
+                    for item in list.iter() {
+                        let n = item.cast::<PyNode>()?;
+                        let nb = n.borrow();
+                        if s.is_none() {
+                            s = Some(nb.inner.schema.clone());
+                        }
+                        nodes.push(nb.inner.inner.clone());
+                    }
+                    schema = s.unwrap_or_else(|| Arc::new(DynamicSchema::default()));
+                    FragmentFromInput::NodeArray(nodes)
+                } else {
+                    return Err(PyValueError::new_err(
+                        "Fragment.from_: expected Node, list of Nodes, Fragment, or None",
+                    ));
+                }
+            }
+        };
+        Ok(PyFragment {
+            inner: b_fragment_from(schema, finput),
         })
     }
 
@@ -1213,6 +1364,68 @@ impl PyNode {
         Ok(self.inner.node_at(pos).map(|bn| PyNode { inner: bn }))
     }
 
+    #[pyo3(signature = (type_, attrs=None, marks=None))]
+    fn has_markup(
+        &self,
+        type_: &PyNodeType,
+        attrs: Option<&Bound<'_, PyAny>>,
+        marks: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<bool> {
+        let attrs_val = attrs.map(py_to_json).transpose()?;
+        let raw_marks: Option<Vec<_>> = marks
+            .map(|m| {
+                let set = extract_markset(m)?;
+                Ok::<_, PyErr>(set.iter().cloned().collect::<Vec<_>>())
+            })
+            .transpose()?;
+        Ok(self
+            .inner
+            .has_markup(&type_.inner, attrs_val.as_ref(), raw_marks.as_deref()))
+    }
+
+    #[pyo3(signature = (from_, to, replacement=None, start=0, end=None))]
+    fn can_replace(
+        &self,
+        from_: usize,
+        to: usize,
+        replacement: Option<&PyFragment>,
+        start: usize,
+        end: Option<usize>,
+    ) -> bool {
+        self.inner
+            .can_replace(from_, to, replacement.map(|f| &f.inner), start, end)
+    }
+
+    fn can_replace_with(&self, from_: usize, to: usize, type_: &PyNodeType) -> bool {
+        self.inner.can_replace_with(from_, to, &type_.inner)
+    }
+
+    fn child_after(&self, pos: usize, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        match self.inner.child_after(pos) {
+            None => Ok(None),
+            Some((node, index, offset)) => {
+                let d = PyDict::new(py);
+                d.set_item("node", PyNode { inner: node })?;
+                d.set_item("index", index)?;
+                d.set_item("offset", offset)?;
+                Ok(Some(d.into_any().unbind()))
+            }
+        }
+    }
+
+    fn child_before(&self, pos: usize, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        match self.inner.child_before(pos) {
+            None => Ok(None),
+            Some((node, index, offset)) => {
+                let d = PyDict::new(py);
+                d.set_item("node", PyNode { inner: node })?;
+                d.set_item("index", index)?;
+                d.set_item("offset", offset)?;
+                Ok(Some(d.into_any().unbind()))
+            }
+        }
+    }
+
     fn maybe_child(&self, index: usize) -> Option<PyNode> {
         self.inner.maybe_child(index).map(|bn| PyNode { inner: bn })
     }
@@ -1653,6 +1866,22 @@ impl PyNodeRange {
     #[getter]
     fn end_index(&self) -> usize {
         self.inner.end_index()
+    }
+
+    /// The resolved start position of this range (JS: `$from`).
+    #[getter]
+    fn from_(&self) -> PyResolvedPos {
+        PyResolvedPos {
+            inner: self.inner.from_resolved_pos(),
+        }
+    }
+
+    /// The resolved end position of this range (JS: `$to`).
+    #[getter]
+    fn to_(&self) -> PyResolvedPos {
+        PyResolvedPos {
+            inner: self.inner.to_resolved_pos(),
+        }
     }
 }
 

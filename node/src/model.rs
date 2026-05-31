@@ -6,7 +6,8 @@ use napi_derive::napi;
 use serde_json::Value;
 
 use prosemirror::binding::model::{
-    BContentMatch, BFragment, BMark, BMarkType, BNode, BNodeRange, BNodeType, BResolvedPos, BSlice,
+    b_fragment_from, b_schema_top_node_type, BContentMatch, BFragment, BMark, BMarkType, BNode,
+    BNodeRange, BNodeType, BResolvedPos, BSlice, FragmentFromInput,
 };
 use prosemirror::dynamic::types::{Dyn, DynamicMarkType, DynamicNode, DynamicNodeType};
 use prosemirror::dynamic::DynamicSchema;
@@ -190,6 +191,13 @@ impl Schema {
             },
         })
     }
+
+    #[napi(getter, js_name = "topNodeType")]
+    pub fn top_node_type(&self) -> napi::Result<NodeType_> {
+        b_schema_top_node_type(&self.inner)
+            .map(|inner| NodeType_ { inner })
+            .ok_or_else(|| napi::Error::new(Status::InvalidArg, "Unknown top node type"))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +367,44 @@ impl NodeType_ {
             MarkSet::from_vec(marks.into_iter().map(|m| m.inner.inner.clone()).collect());
         self.inner.allows_marks(&mark_set)
     }
+
+    #[napi]
+    pub fn is_in_group(&self, group: String) -> bool {
+        self.inner.is_in_group(&group)
+    }
+
+    #[napi(getter)]
+    pub fn attrs(&self) -> Value {
+        self.inner.attrs_defaults()
+    }
+
+    #[napi(getter, js_name = "markSet")]
+    pub fn mark_set(&self) -> Option<Vec<MarkType_>> {
+        self.inner
+            .mark_set()
+            .map(|ms| ms.into_iter().map(|bmt| MarkType_ { inner: bmt }).collect())
+    }
+
+    #[napi]
+    pub fn allowed_marks(&self, marks: Vec<&Mark_>) -> Vec<Mark_> {
+        let raw: Vec<_> = marks.into_iter().map(|m| m.inner.inner.clone()).collect();
+        let schema = self.inner.schema.clone();
+        self.inner
+            .allowed_marks_filtered(raw)
+            .into_iter()
+            .map(|m| Mark_ {
+                inner: BMark {
+                    schema: schema.clone(),
+                    inner: m,
+                },
+            })
+            .collect()
+    }
+
+    #[napi(getter)]
+    pub fn spec(&self) -> Value {
+        self.inner.spec_json()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -416,6 +462,11 @@ impl MarkType_ {
     #[napi]
     pub fn excludes(&self, other: &MarkType_) -> bool {
         self.inner.excludes(&other.inner)
+    }
+
+    #[napi(getter)]
+    pub fn spec(&self) -> Value {
+        self.inner.spec_json()
     }
 }
 
@@ -487,11 +538,32 @@ impl Mark_ {
         let marks: Vec<_> = set.iter().map(|m| m.inner.inner.clone()).collect();
         self.inner.is_in_set(&marks)
     }
-}
 
-// ---------------------------------------------------------------------------
-// Fragment
-// ---------------------------------------------------------------------------
+    #[napi(js_name = "sameSet")]
+    pub fn same_set(a: Vec<&Mark_>, b: Vec<&Mark_>) -> bool {
+        let av: Vec<_> = a.iter().map(|m| m.inner.inner.clone()).collect();
+        let bv: Vec<_> = b.iter().map(|m| m.inner.inner.clone()).collect();
+        BMark::same_set(&av, &bv)
+    }
+
+    #[napi(js_name = "setFrom")]
+    pub fn set_from(schema: &Schema, marks: Option<Vec<&Mark_>>) -> Vec<Mark_> {
+        let raw: Vec<_> = marks
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| m.inner.inner.clone())
+            .collect();
+        BMark::set_from(&schema.inner, raw)
+            .into_iter()
+            .map(|m| Mark_ {
+                inner: BMark {
+                    schema: schema.inner.clone(),
+                    inner: m,
+                },
+            })
+            .collect()
+    }
+}
 
 #[napi]
 pub struct Fragment_ {
@@ -530,12 +602,26 @@ impl Fragment_ {
     }
 
     #[napi(factory)]
-    pub fn from_(nodes: Option<Vec<&Node_>>) -> Fragment_ {
-        match nodes {
-            None => Fragment_ {
-                inner: BFragment::empty(Arc::new(DynamicSchema::default())),
-            },
-            Some(nodes) => Fragment_::from_array(nodes),
+    pub fn from_(input: Option<Either3<&Node_, Vec<&Node_>, &Fragment_>>) -> Fragment_ {
+        let schema = match &input {
+            Some(Either3::A(n)) => n.inner.schema.clone(),
+            Some(Either3::B(ns)) => ns
+                .first()
+                .map(|n| n.inner.schema.clone())
+                .unwrap_or_else(|| Arc::new(DynamicSchema::default())),
+            Some(Either3::C(f)) => f.inner.schema.clone(),
+            None => Arc::new(DynamicSchema::default()),
+        };
+        let finput = match input {
+            None => FragmentFromInput::Null,
+            Some(Either3::A(n)) => FragmentFromInput::SingleNode(n.inner.clone()),
+            Some(Either3::B(ns)) => FragmentFromInput::NodeArray(
+                ns.into_iter().map(|n| n.inner.inner.clone()).collect(),
+            ),
+            Some(Either3::C(f)) => FragmentFromInput::Fragment(f.inner.clone()),
+        };
+        Fragment_ {
+            inner: b_fragment_from(schema, finput),
         }
     }
 
@@ -767,6 +853,28 @@ impl Fragment_ {
     #[napi]
     pub fn to_json(&self) -> Value {
         self.inner.to_json()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NodeChildResult
+// ---------------------------------------------------------------------------
+
+/// Return type of [`Node_.child_after`] and [`Node_.child_before`].
+#[napi]
+pub struct NodeChildResult {
+    pub(crate) inner_node: BNode,
+    pub index: u32,
+    pub offset: u32,
+}
+
+#[napi]
+impl NodeChildResult {
+    #[napi(getter)]
+    pub fn node(&self) -> Node_ {
+        Node_ {
+            inner: self.inner_node.clone(),
+        }
     }
 }
 
@@ -1191,6 +1299,65 @@ impl Node_ {
     pub fn node_at(&self, pos: u32) -> Option<Node_> {
         self.inner.node_at(pos as usize).map(|n| Node_ { inner: n })
     }
+
+    #[napi(js_name = "hasMarkup")]
+    pub fn has_markup(
+        &self,
+        type_: &NodeType_,
+        attrs: Option<Value>,
+        marks: Option<Vec<&Mark_>>,
+    ) -> bool {
+        let raw_marks: Option<Vec<_>> =
+            marks.map(|ms| ms.iter().map(|m| m.inner.inner.clone()).collect());
+        self.inner
+            .has_markup(&type_.inner, attrs.as_ref(), raw_marks.as_deref())
+    }
+
+    #[napi(js_name = "canReplace")]
+    pub fn can_replace(
+        &self,
+        from: u32,
+        to: u32,
+        replacement: Option<&Fragment_>,
+        start: Option<u32>,
+        end: Option<u32>,
+    ) -> bool {
+        self.inner.can_replace(
+            from as usize,
+            to as usize,
+            replacement.map(|f| &f.inner),
+            start.unwrap_or(0) as usize,
+            end.map(|e| e as usize),
+        )
+    }
+
+    #[napi(js_name = "canReplaceWith")]
+    pub fn can_replace_with(&self, from: u32, to: u32, type_: &NodeType_) -> bool {
+        self.inner
+            .can_replace_with(from as usize, to as usize, &type_.inner)
+    }
+
+    #[napi(js_name = "childAfter")]
+    pub fn child_after(&self, pos: u32) -> Option<NodeChildResult> {
+        self.inner
+            .child_after(pos as usize)
+            .map(|(node, index, offset)| NodeChildResult {
+                inner_node: node,
+                index: index as u32,
+                offset: offset as u32,
+            })
+    }
+
+    #[napi(js_name = "childBefore")]
+    pub fn child_before(&self, pos: u32) -> Option<NodeChildResult> {
+        self.inner
+            .child_before(pos as usize)
+            .map(|(node, index, offset)| NodeChildResult {
+                inner_node: node,
+                index: index as u32,
+                offset: offset as u32,
+            })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1509,4 +1676,10 @@ pub fn content_match_parse(expr: String, schema: &Schema) -> napi::Result<Conten
     BContentMatch::parse(&expr, &schema.inner)
         .map(|inner| ContentMatch_ { inner })
         .map_err(|e| napi::Error::new(napi::Status::InvalidArg, e))
+}
+
+/// `Mark.none` — the empty mark set constant (a JS static property).
+#[napi(js_name = "markNone")]
+pub fn mark_none() -> Vec<Mark_> {
+    Vec::new()
 }

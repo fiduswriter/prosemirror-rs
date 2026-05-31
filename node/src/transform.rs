@@ -173,6 +173,13 @@ impl Mapping_ {
             inner: self.inner.slice(from as usize, to.map(|t| t as usize)),
         }
     }
+
+    #[napi]
+    pub fn copy(&self) -> Mapping_ {
+        Mapping_ {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +436,21 @@ impl Transform_ {
     #[napi(getter)]
     pub fn doc_changed(&self) -> bool {
         self.inner.doc_changed()
+    }
+
+    #[napi]
+    pub fn clear_incompatible(
+        &mut self,
+        pos: u32,
+        node_type: &crate::model::NodeType_,
+        clear_newlines: bool,
+    ) {
+        let nt = node_type.inner.inner;
+        let schema = self.schema.clone();
+        schema.with_types(|| {
+            self.inner
+                .clear_incompatible(pos as usize, nt, None, clear_newlines);
+        });
     }
 
     #[napi]
