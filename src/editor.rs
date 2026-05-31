@@ -118,7 +118,7 @@ impl Editor {
             None
         };
 
-        for step in steps {
+        for step in steps.into_iter() {
             let result = {
                 let schema = &self.schema;
                 let doc = &self.doc;

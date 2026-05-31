@@ -29,7 +29,7 @@ pub fn extract_fragment(val: &Value, schema: &DynamicSchema) -> napi::Result<Fra
     if let Ok(nodes) =
         serde_json::from_value::<Vec<prosemirror::dynamic::types::DynamicNode>>(val.clone())
     {
-        return Ok(schema.with_types(|| Fragment::from(nodes)));
+        return Ok(schema.with_types(|| Fragment::from_array(nodes)));
     }
     Err(napi::Error::new(
         Status::InvalidArg,
@@ -108,7 +108,7 @@ impl Schema {
         let attrs = attrs.unwrap_or(Value::Null);
         let content = self.inner.with_types(|| match content {
             Some(Either::A(frag)) => frag.inner.inner.clone(),
-            Some(Either::B(nodes)) => Fragment::from(
+            Some(Either::B(nodes)) => Fragment::from_array(
                 nodes
                     .into_iter()
                     .map(|n| n.inner.inner.clone())
@@ -287,7 +287,7 @@ impl NodeType_ {
         let attrs = attrs.unwrap_or(Value::Null);
         let content = self.inner.schema.with_types(|| match content {
             Some(Either::A(frag)) => frag.inner.inner.clone(),
-            Some(Either::B(nodes)) => Fragment::from(
+            Some(Either::B(nodes)) => Fragment::from_array(
                 nodes
                     .into_iter()
                     .map(|n| n.inner.inner.clone())
@@ -325,7 +325,7 @@ impl NodeType_ {
         let attrs = attrs.unwrap_or(Value::Null);
         let content = self.inner.schema.with_types(|| match content {
             Some(Either::A(frag)) => Some(frag.inner.inner.clone()),
-            Some(Either::B(nodes)) => Some(Fragment::from(
+            Some(Either::B(nodes)) => Some(Fragment::from_array(
                 nodes
                     .into_iter()
                     .map(|n| n.inner.inner.clone())
@@ -514,7 +514,7 @@ impl Fragment_ {
             .map(|n| n.inner.schema.clone())
             .unwrap_or_else(|| Arc::new(DynamicSchema::default()));
         let frag = schema.with_types(|| {
-            Fragment::from(
+            Fragment::from_array(
                 nodes
                     .into_iter()
                     .map(|n| n.inner.inner.clone())

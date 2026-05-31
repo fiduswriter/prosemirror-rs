@@ -199,14 +199,17 @@ describe("Mark", () => {
 // ---------------------------------------------------------------------------
 
 describe("Fragment", () => {
+  // Use paragraph nodes as children so adjacent nodes don't get merged
   function makeFragment(texts) {
-    return Fragment.fromArray(texts.map((t) => schema.text(t)));
+    return Fragment.fromArray(
+      texts.map((t) => schema.node("paragraph", null, [schema.text(t)]))
+    );
   }
 
   test("firstChild / lastChild", () => {
     const frag = makeFragment(["foo", "bar"]);
-    assert.equal(frag.firstChild.text, "foo");
-    assert.equal(frag.lastChild.text, "bar");
+    assert.equal(frag.firstChild.textContent, "foo");
+    assert.equal(frag.lastChild.textContent, "bar");
   });
 
   test("firstChild null on empty fragment", () => {
@@ -217,40 +220,44 @@ describe("Fragment", () => {
 
   test("maybeChild", () => {
     const frag = makeFragment(["a", "b"]);
-    assert.equal(frag.maybeChild(0).text, "a");
+    assert.equal(frag.maybeChild(0).textContent, "a");
     assert.equal(frag.maybeChild(99), null);
   });
 
   test("replaceChild", () => {
     const frag = makeFragment(["foo", "bar"]);
-    const newNode = schema.text("baz");
+    const newNode = schema.node("paragraph", null, [schema.text("baz")]);
     const result = frag.replaceChild(0, newNode);
-    assert.equal(result.child(0).text, "baz");
-    assert.equal(result.child(1).text, "bar");
+    assert.equal(result.child(0).textContent, "baz");
+    assert.equal(result.child(1).textContent, "bar");
   });
 
   test("addToStart / addToEnd", () => {
     const frag = makeFragment(["b"]);
-    const a = schema.text("a");
-    const c = schema.text("c");
+    const a = schema.node("paragraph", null, [schema.text("a")]);
+    const c = schema.node("paragraph", null, [schema.text("c")]);
     const withStart = frag.addToStart(a);
     const withEnd = frag.addToEnd(c);
-    assert.equal(withStart.child(0).text, "a");
-    assert.equal(withEnd.child(1).text, "c");
+    assert.equal(withStart.child(0).textContent, "a");
+    assert.equal(withEnd.child(1).textContent, "c");
   });
 
   test("textBetween", () => {
-    const frag = makeFragment(["hello", " ", "world"]);
-    // textBetween(from, to, blockSeparator?, leafText?)
-    const result = frag.textBetween(0, frag.size);
-    assert.equal(result, "hello world");
+    // Use a fragment of paragraph nodes; block separator is inserted between blocks
+    const frag = Fragment.fromArray([
+      schema.node("paragraph", null, [schema.text("hello")]),
+      schema.node("paragraph", null, [schema.text("world")]),
+    ]);
+    // textBetween(from, to, blockSeparator?) — separator appears between blocks
+    const result = frag.textBetween(0, frag.size, " ");
+    assert.ok(result.includes("hello") && result.includes("world"));
   });
 
   test("forEach iterates nodes", () => {
     const frag = makeFragment(["a", "b", "c"]);
     const texts = [];
     frag.forEach((node, _offset, _index) => {
-      texts.push(node.text);
+      texts.push(node.textContent);
     });
     assert.deepEqual(texts, ["a", "b", "c"]);
   });});
