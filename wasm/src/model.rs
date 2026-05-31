@@ -257,6 +257,7 @@ impl Schema {
     }
 
     /// Create a node from a JSON representation.
+    #[wasm_bindgen(js_name = nodeFromJson)]
     pub fn node_from_json(&self, json: JsValue) -> Result<Node, JsValue> {
         let val = js_to_value(&json)?;
         let inner_node = self
@@ -272,6 +273,7 @@ impl Schema {
     }
 
     /// Create a mark from a JSON representation.
+    #[wasm_bindgen(js_name = markFromJson)]
     pub fn mark_from_json(&self, json: JsValue) -> Result<Mark, JsValue> {
         let val = js_to_value(&json)?;
         let inner_mark = self
@@ -287,6 +289,7 @@ impl Schema {
     }
 
     /// The top-level node type (typically "doc").
+    #[wasm_bindgen(js_name = topNodeType)]
     pub fn top_node_type(&self) -> Option<NodeType> {
         b_schema_top_node_type(&self.inner).map(|nt| NodeType { inner: nt })
     }
@@ -319,48 +322,49 @@ impl NodeType {
     }
 
     /// True if this is a block node type.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isBlock)]
     pub fn is_block(&self) -> bool {
         self.inner.is_block()
     }
 
     /// True if this is an inline node type.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isInline)]
     pub fn is_inline(&self) -> bool {
         self.inner.is_inline()
     }
 
     /// True if this is a textblock node type.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isTextblock)]
     pub fn is_textblock(&self) -> bool {
         self.inner.is_textblock()
     }
 
     /// True if this is an atom node type.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isAtom)]
     pub fn is_atom(&self) -> bool {
         self.inner.is_atom()
     }
 
     /// True if this is a leaf node type.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isLeaf)]
     pub fn is_leaf(&self) -> bool {
         self.inner.is_leaf()
     }
 
     /// True if this is the text node type.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isText)]
     pub fn is_text(&self) -> bool {
         self.inner.is_text()
     }
 
     /// True if this node type allows inline content.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = inlineContent)]
     pub fn inline_content(&self) -> bool {
         self.inner.inline_content()
     }
 
     /// Get the ContentMatch for this node type's content expression.
+    #[wasm_bindgen(js_name = contentMatch)]
     pub fn content_match(&self) -> Option<ContentMatch> {
         self.inner
             .content_match()
@@ -368,11 +372,13 @@ impl NodeType {
     }
 
     /// True if this node type has required attributes.
+    #[wasm_bindgen(js_name = hasRequiredAttrs)]
     pub fn has_required_attrs(&self) -> bool {
         self.inner.has_required_attrs()
     }
 
     /// True if this node type's content can be placed in the other node type.
+    #[wasm_bindgen(js_name = compatibleContent)]
     pub fn compatible_content(&self, other: &NodeType) -> bool {
         self.inner.compatible_content(&other.inner)
     }
@@ -384,7 +390,7 @@ impl NodeType {
     }
 
     /// True if this node type is rendered as pre-formatted (code).
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isCode)]
     pub fn is_code(&self) -> bool {
         self.inner.is_code()
     }
@@ -410,6 +416,7 @@ impl NodeType {
     }
 
     /// Create a node of this type, returning an error if invalid.
+    #[wasm_bindgen(js_name = createChecked)]
     pub fn create_checked(
         &self,
         attrs: JsValue,
@@ -433,6 +440,7 @@ impl NodeType {
     }
 
     /// Create a node of this type and fill in the content if possible.
+    #[wasm_bindgen(js_name = createAndFill)]
     pub fn create_and_fill(
         &self,
         attrs: JsValue,
@@ -452,16 +460,19 @@ impl NodeType {
     }
 
     /// Check whether the given fragment is valid content for this node type.
+    #[wasm_bindgen(js_name = validContent)]
     pub fn valid_content(&self, fragment: &Fragment) -> bool {
         self.inner.valid_content(&fragment.inner.inner)
     }
 
     /// True if this node type allows the given mark type.
+    #[wasm_bindgen(js_name = allowsMarkType)]
     pub fn allows_mark_type(&self, mark_type: &MarkType) -> bool {
         self.inner.allows_mark_type(&mark_type.inner)
     }
 
     /// True if this node type allows the given set of marks.
+    #[wasm_bindgen(js_name = allowsMarks)]
     pub fn allows_marks(&self, marks: Vec<Mark>) -> bool {
         let dyn_marks: Vec<DynamicMark> = marks.iter().map(|m| m.inner.inner.clone()).collect();
         let mark_set = MarkSet::from_vec(dyn_marks);
@@ -469,6 +480,7 @@ impl NodeType {
     }
 
     /// True if this node type belongs to the given group.
+    #[wasm_bindgen(js_name = isInGroup)]
     pub fn is_in_group(&self, group: &str) -> bool {
         self.inner.is_in_group(group)
     }
@@ -480,6 +492,7 @@ impl NodeType {
     }
 
     /// The set of mark types allowed by this node type (null if all marks are allowed).
+    #[wasm_bindgen(js_name = markSet)]
     pub fn mark_set(&self) -> Option<Array> {
         self.inner
             .mark_set()
@@ -487,6 +500,7 @@ impl NodeType {
     }
 
     /// Filter the given marks to only those allowed by this node type.
+    #[wasm_bindgen(js_name = allowedMarks)]
     pub fn allowed_marks(&self, marks: Vec<Mark>) -> Array {
         let dyn_marks: Vec<DynamicMark> = marks.iter().map(|m| m.inner.inner.clone()).collect();
         let filtered = self.inner.allowed_marks_filtered(dyn_marks);
@@ -534,6 +548,7 @@ impl MarkType {
     }
 
     /// Remove all marks of this type from the given set.
+    #[wasm_bindgen(js_name = removeFromSet)]
     pub fn remove_from_set(&self, marks: Vec<Mark>) -> Array {
         let dyn_marks: Vec<DynamicMark> = marks.iter().map(|m| m.inner.inner.clone()).collect();
         let result = self.inner.remove_from_set(dyn_marks);
@@ -541,6 +556,7 @@ impl MarkType {
     }
 
     /// Find the first mark of this type in the given set.
+    #[wasm_bindgen(js_name = isInSet)]
     pub fn is_in_set(&self, marks: Vec<Mark>) -> Option<Mark> {
         let dyn_marks: Vec<DynamicMark> = marks.iter().map(|m| m.inner.inner.clone()).collect();
         self.inner.is_in_set(&dyn_marks).map(|inner| Mark { inner })
@@ -585,12 +601,14 @@ impl Mark {
     }
 
     /// JSON representation: `{type, attrs}`.
+    #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.to_json();
         value_to_js(&val)
     }
 
     /// Add this mark to a set of marks, returning a new sorted set.
+    #[wasm_bindgen(js_name = addToSet)]
     pub fn add_to_set(&self, set: Vec<Mark>) -> Array {
         let dyn_marks: Vec<DynamicMark> = set.iter().map(|m| m.inner.inner.clone()).collect();
         let result = self.inner.add_to_set(dyn_marks);
@@ -598,6 +616,7 @@ impl Mark {
     }
 
     /// Remove this mark from a set of marks.
+    #[wasm_bindgen(js_name = removeFromSet)]
     pub fn remove_from_set(&self, set: Vec<Mark>) -> Array {
         let dyn_marks: Vec<DynamicMark> = set.iter().map(|m| m.inner.inner.clone()).collect();
         let result = self.inner.remove_from_set(dyn_marks);
@@ -605,6 +624,7 @@ impl Mark {
     }
 
     /// True if this mark is in the given set.
+    #[wasm_bindgen(js_name = isInSet)]
     pub fn is_in_set(&self, set: Vec<Mark>) -> bool {
         let dyn_marks: Vec<DynamicMark> = set.iter().map(|m| m.inner.inner.clone()).collect();
         self.inner.is_in_set(&dyn_marks)
@@ -616,6 +636,7 @@ impl Mark {
     }
 
     /// Test whether two mark sets are equal (same marks in the same order).
+    #[wasm_bindgen(js_name = sameSet)]
     pub fn same_set(a: Vec<Mark>, b: Vec<Mark>) -> bool {
         let marks_a: Vec<DynamicMark> = a.iter().map(|m| m.inner.inner.clone()).collect();
         let marks_b: Vec<DynamicMark> = b.iter().map(|m| m.inner.inner.clone()).collect();
@@ -623,6 +644,7 @@ impl Mark {
     }
 
     /// Create a sorted, deduplicated mark set from an array of marks.
+    #[wasm_bindgen(js_name = setFrom)]
     pub fn set_from(schema: &Schema, marks: Vec<Mark>) -> Array {
         let dyn_marks: Vec<DynamicMark> = marks.iter().map(|m| m.inner.inner.clone()).collect();
         let result = BMark::set_from(&schema.inner, dyn_marks);
@@ -643,6 +665,7 @@ pub struct Fragment {
 #[wasm_bindgen]
 impl Fragment {
     /// Create a fragment from an array of child nodes.
+    #[wasm_bindgen(js_name = fromArray)]
     pub fn from_array(schema: &Schema, nodes: Vec<Node>) -> Fragment {
         let dyn_nodes: Vec<DynamicNode> = nodes.iter().map(|n| n.inner.inner.clone()).collect();
         let inner = schema
@@ -671,7 +694,7 @@ impl Fragment {
     }
 
     /// Number of child nodes.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = childCount)]
     pub fn child_count(&self) -> usize {
         self.inner.child_count()
     }
@@ -682,18 +705,19 @@ impl Fragment {
     }
 
     /// Like `child`, but returns null if index is out of range.
+    #[wasm_bindgen(js_name = maybeChild)]
     pub fn maybe_child(&self, index: usize) -> Option<Node> {
         self.inner.maybe_child(index).map(|n| Node { inner: n })
     }
 
     /// The first child, or null if empty.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = firstChild)]
     pub fn first_child(&self) -> Option<Node> {
         self.inner.first_child().map(|n| Node { inner: n })
     }
 
     /// The last child, or null if empty.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = lastChild)]
     pub fn last_child(&self) -> Option<Node> {
         self.inner.last_child().map(|n| Node { inner: n })
     }
@@ -713,6 +737,7 @@ impl Fragment {
     }
 
     /// Replace a child at the given index.
+    #[wasm_bindgen(js_name = replaceChild)]
     pub fn replace_child(&self, index: usize, node: &Node) -> Fragment {
         Fragment {
             inner: self.inner.replace_child(index, node.inner.inner.clone()),
@@ -720,6 +745,7 @@ impl Fragment {
     }
 
     /// Add a node to the start of the fragment.
+    #[wasm_bindgen(js_name = addToStart)]
     pub fn add_to_start(&self, node: &Node) -> Fragment {
         Fragment {
             inner: self.inner.add_to_start(node.inner.inner.clone()),
@@ -727,6 +753,7 @@ impl Fragment {
     }
 
     /// Add a node to the end of the fragment.
+    #[wasm_bindgen(js_name = addToEnd)]
     pub fn add_to_end(&self, node: &Node) -> Fragment {
         Fragment {
             inner: self.inner.add_to_end(node.inner.inner.clone()),
@@ -739,11 +766,13 @@ impl Fragment {
     }
 
     /// Find the first position at which this fragment differs from another.
+    #[wasm_bindgen(js_name = findDiffStart)]
     pub fn find_diff_start(&self, other: &Fragment) -> Option<usize> {
         self.inner.find_diff_start(&other.inner)
     }
 
     /// Find the position and dimensions at which this fragment ends differently.
+    #[wasm_bindgen(js_name = findDiffEnd)]
     pub fn find_diff_end(&self, other: &Fragment) -> Option<JsValue> {
         self.inner.find_diff_end(&other.inner).map(|(a, b)| {
             let arr = Array::new();
@@ -754,6 +783,7 @@ impl Fragment {
     }
 
     /// Get the text content between two positions.
+    #[wasm_bindgen(js_name = textBetween)]
     pub fn text_between(
         &self,
         from: usize,
@@ -768,6 +798,7 @@ impl Fragment {
     }
 
     /// JSON representation of this fragment.
+    #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.to_json();
         value_to_js(&val)
@@ -776,6 +807,7 @@ impl Fragment {
     /// Call a function for each direct child node.
     ///
     /// The callback receives `(node, offset, index)`.
+    #[wasm_bindgen(js_name = forEach)]
     pub fn for_each(&self, f: &Function) -> Result<(), JsValue> {
         let this = JsValue::null();
         let mut should_stop = false;
@@ -815,6 +847,7 @@ impl Fragment {
     /// Call a function for all descendant nodes between two positions.
     ///
     /// The callback receives `(node, pos, parent, index)`. Return false to stop.
+    #[wasm_bindgen(js_name = nodesBetween)]
     pub fn nodes_between(&self, from: usize, to: usize, f: &Function) -> Result<(), JsValue> {
         let this = JsValue::null();
         self.inner
@@ -887,13 +920,13 @@ impl Slice {
     }
 
     /// The open depth at the start.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = openStart)]
     pub fn open_start(&self) -> usize {
         self.inner.open_start()
     }
 
     /// The open depth at the end.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = openEnd)]
     pub fn open_end(&self) -> usize {
         self.inner.open_end()
     }
@@ -910,6 +943,7 @@ impl Slice {
     }
 
     /// JSON representation of this slice.
+    #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.to_json();
         value_to_js(&val)
@@ -962,73 +996,73 @@ impl Node {
     }
 
     /// The concatenated text of all text node descendants.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = textContent)]
     pub fn text_content(&self) -> String {
         self.inner.text_content()
     }
 
     /// The size of this node (including start/end tokens).
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = nodeSize)]
     pub fn node_size(&self) -> usize {
         self.inner.node_size()
     }
 
     /// Number of child nodes.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = childCount)]
     pub fn child_count(&self) -> usize {
         self.inner.child_count()
     }
 
     /// True if this is a text node.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isText)]
     pub fn is_text(&self) -> bool {
         self.inner.is_text()
     }
 
     /// True if this is a block node.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isBlock)]
     pub fn is_block(&self) -> bool {
         self.inner.is_block()
     }
 
     /// True if this is an inline node.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isInline)]
     pub fn is_inline(&self) -> bool {
         self.inner.is_inline()
     }
 
     /// True if this is a leaf node.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isLeaf)]
     pub fn is_leaf(&self) -> bool {
         self.inner.is_leaf()
     }
 
     /// True if this is a textblock node.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isTextblock)]
     pub fn is_textblock(&self) -> bool {
         self.inner.is_textblock()
     }
 
     /// True if this is an atom node.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = isAtom)]
     pub fn is_atom(&self) -> bool {
         self.inner.is_atom()
     }
 
     /// True if this node allows inline content.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = inlineContent)]
     pub fn inline_content(&self) -> bool {
         self.inner.inline_content()
     }
 
     /// The first child, or null.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = firstChild)]
     pub fn first_child(&self) -> Option<Node> {
         self.inner.first_child().map(|n| Node { inner: n })
     }
 
     /// The last child, or null.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = lastChild)]
     pub fn last_child(&self) -> Option<Node> {
         self.inner.last_child().map(|n| Node { inner: n })
     }
@@ -1039,26 +1073,31 @@ impl Node {
     }
 
     /// Like `child`, but returns null if index is out of range.
+    #[wasm_bindgen(js_name = maybeChild)]
     pub fn maybe_child(&self, index: usize) -> Option<Node> {
         self.inner.maybe_child(index).map(|n| Node { inner: n })
     }
 
     /// True if this node has the same markup as another (same type, attrs, marks).
+    #[wasm_bindgen(js_name = sameMarkup)]
     pub fn same_markup(&self, other: &Node) -> bool {
         self.inner.same_markup(&other.inner)
     }
 
     /// True if a mark of the given type exists in the range.
+    #[wasm_bindgen(js_name = rangeHasMark)]
     pub fn range_has_mark(&self, from: usize, to: usize, mark_type: &MarkType) -> bool {
         self.inner.range_has_mark(from, to, mark_type.inner.inner)
     }
 
     /// True if the given node can be appended to this one.
+    #[wasm_bindgen(js_name = canAppend)]
     pub fn can_append(&self, other: &Node) -> bool {
         self.inner.can_append(&other.inner)
     }
 
     /// Get the ContentMatch at the given child index.
+    #[wasm_bindgen(js_name = contentMatchAt)]
     pub fn content_match_at(&self, index: usize) -> Result<ContentMatch, JsValue> {
         let inner = self
             .inner
@@ -1068,6 +1107,7 @@ impl Node {
     }
 
     /// Get the text content between two positions.
+    #[wasm_bindgen(js_name = textBetween)]
     pub fn text_between(
         &self,
         from: usize,
@@ -1084,6 +1124,7 @@ impl Node {
     /// Call a function for each direct child node.
     ///
     /// The callback receives `(node, offset, index)`.
+    #[wasm_bindgen(js_name = forEach)]
     pub fn for_each(&self, f: &Function) -> Result<(), JsValue> {
         let this = JsValue::null();
         let mut should_stop = false;
@@ -1123,6 +1164,7 @@ impl Node {
     /// Call a function for all nodes between two positions.
     ///
     /// The callback receives `(node, pos, parent, index)`. Return false to stop.
+    #[wasm_bindgen(js_name = nodesBetween)]
     pub fn nodes_between(&self, from: usize, to: usize, f: &Function) -> Result<(), JsValue> {
         let this = JsValue::null();
         self.inner
@@ -1231,6 +1273,7 @@ impl Node {
     }
 
     /// JSON representation of this node.
+    #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.to_json(false);
         value_to_js(&val)
@@ -1264,6 +1307,7 @@ impl Node {
     }
 
     /// Get the node at the given position, if any.
+    #[wasm_bindgen(js_name = nodeAt)]
     pub fn node_at(&self, pos: usize) -> Option<Node> {
         self.inner.node_at(pos).map(|n| Node { inner: n })
     }
@@ -1272,6 +1316,7 @@ impl Node {
     ///
     /// `marks` can be null (don't check marks), an empty array (check for no marks),
     /// or an array of Mark objects.
+    #[wasm_bindgen(js_name = hasMarkup)]
     pub fn has_markup(
         &self,
         type_: &NodeType,
@@ -1294,17 +1339,20 @@ impl Node {
 
     /// Returns `{node, index, offset}` for the child immediately after `pos`,
     /// or null.
+    #[wasm_bindgen(js_name = childAfter)]
     pub fn child_after(&self, pos: usize) -> Option<Object> {
         build_child_result(&self.inner.schema, self.inner.child_after(pos))
     }
 
     /// Returns `{node, index, offset}` for the child immediately before `pos`,
     /// or null.
+    #[wasm_bindgen(js_name = childBefore)]
     pub fn child_before(&self, pos: usize) -> Option<Object> {
         build_child_result(&self.inner.schema, self.inner.child_before(pos))
     }
 
     /// Check whether the given fragment can replace the content at `from..to`.
+    #[wasm_bindgen(js_name = canReplace)]
     pub fn can_replace(
         &self,
         from: usize,
@@ -1320,6 +1368,7 @@ impl Node {
     }
 
     /// Check whether a node of the given type can replace the content at `from..to`.
+    #[wasm_bindgen(js_name = canReplaceWith)]
     pub fn can_replace_with(&self, from: usize, to: usize, type_: &NodeType) -> bool {
         self.inner.can_replace_with(from, to, &type_.inner)
     }
@@ -1366,23 +1415,25 @@ impl ResolvedPos {
     }
 
     /// The offset of this position into its parent text node.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = parentOffset)]
     pub fn parent_offset(&self) -> usize {
         self.inner.parent_offset()
     }
 
     /// The offset into the parent text node.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = textOffset)]
     pub fn text_offset(&self) -> usize {
         self.inner.text_offset()
     }
 
     /// The node immediately before this position, if any.
+    #[wasm_bindgen(js_name = nodeBefore)]
     pub fn node_before(&self) -> Option<Node> {
         self.inner.node_before().map(|n| Node { inner: n })
     }
 
     /// The node immediately after this position, if any.
+    #[wasm_bindgen(js_name = nodeAfter)]
     pub fn node_after(&self) -> Option<Node> {
         self.inner.node_after().map(|n| Node { inner: n })
     }
@@ -1400,6 +1451,7 @@ impl ResolvedPos {
     }
 
     /// The index after the ancestor at the given depth.
+    #[wasm_bindgen(js_name = indexAfter)]
     pub fn index_after(&self, depth: Option<usize>) -> usize {
         self.inner.index_after(depth)
     }
@@ -1425,6 +1477,7 @@ impl ResolvedPos {
     }
 
     /// The shared depth between this position and another.
+    #[wasm_bindgen(js_name = sharedDepth)]
     pub fn shared_depth(&self, pos: usize) -> usize {
         self.inner.shared_depth(pos)
     }
@@ -1437,6 +1490,7 @@ impl ResolvedPos {
     }
 
     /// The marks across this position and another.
+    #[wasm_bindgen(js_name = marksAcross)]
     pub fn marks_across(&self, end: &ResolvedPos) -> Option<Array> {
         self.inner
             .marks_across(&end.inner)
@@ -1444,6 +1498,7 @@ impl ResolvedPos {
     }
 
     /// True if this position shares the same parent with another.
+    #[wasm_bindgen(js_name = sameParent)]
     pub fn same_parent(&self, other: &ResolvedPos) -> bool {
         self.inner.same_parent(&other.inner)
     }
@@ -1463,11 +1518,13 @@ impl ResolvedPos {
     }
 
     /// The position at the given index in the ancestor at the given depth.
+    #[wasm_bindgen(js_name = posAtIndex)]
     pub fn pos_at_index(&self, index: usize, depth: Option<usize>) -> usize {
         self.inner.pos_at_index(index, depth)
     }
 
     /// The block range around this position, optionally extended to another.
+    #[wasm_bindgen(js_name = blockRange)]
     pub fn block_range(&self, other: Option<ResolvedPos>) -> Option<NodeRange> {
         let other_opt: Option<&BResolvedPos> = other.as_ref().map(|rp| &rp.inner);
         self.inner
@@ -1531,13 +1588,13 @@ impl NodeRange {
     }
 
     /// The start index of the range's node in its parent.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = startIndex)]
     pub fn start_index(&self) -> usize {
         self.inner.start_index()
     }
 
     /// The end index of the range's node in its parent.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = endIndex)]
     pub fn end_index(&self) -> usize {
         self.inner.end_index()
     }
@@ -1556,12 +1613,13 @@ pub struct ContentMatch {
 #[wasm_bindgen]
 impl ContentMatch {
     /// True if this match state represents a valid end.
-    #[wasm_bindgen(getter)]
+    #[wasm_bindgen(getter, js_name = validEnd)]
     pub fn valid_end(&self) -> bool {
         self.inner.valid_end()
     }
 
     /// Match a node type against this content expression, returning the next state.
+    #[wasm_bindgen(js_name = matchType)]
     pub fn match_type(&self, type_: &NodeType) -> Option<ContentMatch> {
         self.inner
             .match_type(&type_.inner)
@@ -1569,6 +1627,7 @@ impl ContentMatch {
     }
 
     /// Match a fragment against this content expression.
+    #[wasm_bindgen(js_name = matchFragment)]
     pub fn match_fragment(&self, frag: &Fragment) -> Option<ContentMatch> {
         self.inner
             .match_fragment(&frag.inner, 0, None)
@@ -1576,6 +1635,7 @@ impl ContentMatch {
     }
 
     /// Fill this content expression with default nodes before the given fragment.
+    #[wasm_bindgen(js_name = fillBefore)]
     pub fn fill_before(
         &self,
         after: &Fragment,
@@ -1588,11 +1648,13 @@ impl ContentMatch {
     }
 
     /// Get the default node type for this content match, if any.
+    #[wasm_bindgen(js_name = defaultType)]
     pub fn default_type(&self) -> Option<NodeType> {
         self.inner.default_type().map(|nt| NodeType { inner: nt })
     }
 
     /// Find a wrapping of the given node type.
+    #[wasm_bindgen(js_name = findWrapping)]
     pub fn find_wrapping(&self, target: &NodeType) -> Option<Array> {
         self.inner.find_wrapping(&target.inner).map(|types| {
             let arr = Array::new();
@@ -1604,16 +1666,19 @@ impl ContentMatch {
     }
 
     /// Number of outgoing edges from this state.
+    #[wasm_bindgen(js_name = edgeCount)]
     pub fn edge_count(&self) -> usize {
         self.inner.edge_count()
     }
 
     /// The node type for the nth outgoing edge.
+    #[wasm_bindgen(js_name = edgeType)]
     pub fn edge_type(&self, n: usize) -> Option<NodeType> {
         self.inner.edge(n).map(|(nt, _cm)| NodeType { inner: nt })
     }
 
     /// The next ContentMatch state for the nth outgoing edge.
+    #[wasm_bindgen(js_name = edgeMatch)]
     pub fn edge_match(&self, n: usize) -> Option<ContentMatch> {
         self.inner
             .edge(n)
@@ -1630,7 +1695,7 @@ impl ContentMatch {
 /// `node_types` should be an object where each key is a node type name
 /// and each value is either a plain object with a `group` property (e.g.
 /// `{group: "block"}`) or a NodeType instance with a `spec()` method.
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = contentMatchParse)]
 pub fn content_match_parse(expr: &str, node_types: &Object) -> Result<ContentMatch, JsValue> {
     // Build a minimal schema from the node_types object.
     // Extract node type names and group info from the values.

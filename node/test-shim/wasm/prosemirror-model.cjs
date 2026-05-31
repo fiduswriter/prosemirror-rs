@@ -33,7 +33,7 @@ Object.defineProperty(BridgedSchema.prototype, "marks", {
   configurable: true,
 });
 Object.defineProperty(BridgedSchema.prototype, "topNodeType", {
-  get() { return this._wasm.top_node_type(); },
+  get() { return this._wasm.topNodeType(); },
   configurable: true,
 });
 
@@ -41,10 +41,10 @@ Object.defineProperty(BridgedSchema.prototype, "topNodeType", {
 BridgedSchema.prototype.node = function (typeName, attrs, content, marks) {
   let frag = content;
   if (Array.isArray(content)) {
-    frag = wasm.Fragment.from_array(this._wasm, content);
+    frag = wasm.Fragment.fromArray(this._wasm, content);
   } else if (content != null && typeof content === 'object' && content.type) {
     // Single Node — wrap in Fragment
-    frag = wasm.Fragment.from_array(this._wasm, [content]);
+    frag = wasm.Fragment.fromArray(this._wasm, [content]);
   } else if (content == null) {
     frag = null;
   }
@@ -96,11 +96,11 @@ BridgedSchema.prototype.mark = function (typeName, attrs) {
 
 // nodeFromJson / markFromJson — tests call nodeFromJSON/markFromJSON (camelCase)
 BridgedSchema.prototype.nodeFromJson = function (json) {
-  return this._wasm.node_from_json(json);
+  return this._wasm.nodeFromJson(json);
 };
 BridgedSchema.prototype.nodeFromJSON = BridgedSchema.prototype.nodeFromJson;
 BridgedSchema.prototype.markFromJson = function (json) {
-  return this._wasm.mark_from_json(json);
+  return this._wasm.markFromJson(json);
 };
 BridgedSchema.prototype.markFromJSON = BridgedSchema.prototype.markFromJson;
 
@@ -117,9 +117,9 @@ OrigSchema.prototype.text = function (text, marks) {
 const origSchemaNode = OrigSchema.prototype.node;
 OrigSchema.prototype.node = function (typeName, attrs, content, marks) {
   let frag = content;
-  if (Array.isArray(content)) frag = OrigFragment.from_array(this, content);
+  if (Array.isArray(content)) frag = OrigFragment.fromArray(this, content);
   else if (content != null && typeof content === 'object' && content.type)
-    frag = OrigFragment.from_array(this, [content]);
+    frag = OrigFragment.fromArray(this, [content]);
   return origSchemaNode.call(this, typeName, attrs, frag || null, marks || []);
 };
 
@@ -132,26 +132,26 @@ if (OrigNodeType && OrigNodeType.prototype) {
       let frag = content;
       if (Array.isArray(content)) {
         const s = this.schema;
-        frag = OrigFragment.from_array(s, content);
+        frag = OrigFragment.fromArray(s, content);
       } else if (content != null && typeof content === 'object' && content.type) {
         const s = this.schema;
-        frag = OrigFragment.from_array(s, [content]);
+        frag = OrigFragment.fromArray(s, [content]);
       }
       return origCreate.call(this, attrs, frag || null, marks || []);
     };
   }
   // Also patch createChecked and createAndFill
-  ['create_checked', 'create_and_fill'].forEach(method => {
+  ['createChecked', 'createAndFill'].forEach(method => {
     const orig = OrigNodeType.prototype[method];
     if (orig) {
       OrigNodeType.prototype[method] = function (attrs, content, marks) {
         let frag = content;
         if (Array.isArray(content)) {
           const s = this.schema;
-          frag = OrigFragment.from_array(s, content);
+          frag = OrigFragment.fromArray(s, content);
         } else if (content != null && typeof content === 'object' && content.type) {
           const s = this.schema;
-          frag = OrigFragment.from_array(s, [content]);
+          frag = OrigFragment.fromArray(s, [content]);
         } else if (content == null) {
           frag = null;
         }
@@ -235,27 +235,14 @@ Object.defineProperty(BridgedSchema.prototype, "spec", {
 // ---------------------------------------------------------------------------
 const OrigFragment = wasm.Fragment;
 const origFragmentFrom = OrigFragment.from.bind(OrigFragment);
-const origFragmentFromArray = OrigFragment.from_array.bind(OrigFragment);
-
-// CamelCase aliases for Fragment methods
-if (OrigFragment && OrigFragment.prototype) {
-  const fragMethods = [
-    ["findDiffStart", "find_diff_start"],
-    ["findDiffEnd", "find_diff_end"],
-  ];
-  for (const [camel, snake] of fragMethods) {
-    if (!OrigFragment.prototype[camel] && typeof OrigFragment.prototype[snake] === "function") {
-      OrigFragment.prototype[camel] = OrigFragment.prototype[snake];
-    }
-  }
-}
+const origFragmentFromArray = OrigFragment.fromArray.bind(OrigFragment);
 
 // Fragment.from: bridge the JS API to the WASM API.
 // JS: Fragment.from(schema) → empty frag
 // JS: Fragment.from(node) → frag from single node
 // JS: Fragment.from(nodes[]) → frag from array
 // WASM: Fragment.from(schema) → empty frag (original)
-// WASM: Fragment.from_array(schema, nodes[]) → frag from array
+// WASM: Fragment.fromArray(schema, nodes[]) → frag from array
 OrigFragment.from = function (input, schema) {
   // Case 1: null/undefined → empty fragment (need schema)
   if (input == null) {
@@ -356,97 +343,17 @@ if (OrigNode && OrigNode.prototype) {
 // ---------------------------------------------------------------------------
 // Node bridging
 // ---------------------------------------------------------------------------
-// Node.fromJSON
-wasm.Node.fromJSON = wasm.Node.from_json || wasm.Node.fromJson;
-if (wasm.Node.prototype && wasm.Node.prototype.to_json) {
-  wasm.Node.prototype.toJSON = wasm.Node.prototype.to_json;
+// Node.fromJSON (WASM exports as fromJson)
+wasm.Node.fromJSON = wasm.Node.fromJson;
+// Node.prototype.toJSON for JSON.stringify support
+if (wasm.Node.prototype && wasm.Node.prototype.toJson) {
+  wasm.Node.prototype.toJSON = wasm.Node.prototype.toJson;
 }
 
 // ---------------------------------------------------------------------------
-// CamelCase aliases for WASM snake_case METHODS (not getters)
+// CamelCase aliases — now handled natively by WASM js_name attributes.
+// Only kept where WASM exports camelCase but JS tooling expects toJSON.
 // ---------------------------------------------------------------------------
-
-// Helper: copy a property descriptor for camelCase aliases
-function _addCamelAlias(proto, camel, snake) {
-  if (camel in proto) return;
-  const desc = Object.getOwnPropertyDescriptor(proto, snake);
-  if (desc) {
-    Object.defineProperty(proto, camel, desc);
-  }
-}
-
-// Node getters (these are critical for the test builder)
-if (wasm.Node && wasm.Node.prototype) {
-  const nodeGetters = [
-    ["nodeSize", "node_size"],
-    ["childCount", "child_count"],
-    ["firstChild", "first_child"],
-    ["lastChild", "last_child"],
-    ["textContent", "text_content"],
-    ["inlineContent", "inline_content"],
-    ["isAtom", "is_atom"],
-    ["isBlock", "is_block"],
-    ["isInline", "is_inline"],
-    ["isLeaf", "is_leaf"],
-    ["isText", "is_text"],
-    ["isTextblock", "is_textblock"],
-  ];
-  for (const [camel, snake] of nodeGetters) {
-    _addCamelAlias(wasm.Node.prototype, camel, snake);
-  }
-  // type_ → type already handled
-  // toJSON already exists
-}
-
-// Mark methods
-if (wasm.Mark && wasm.Mark.prototype) {
-  if (!wasm.Mark.prototype.addToSet && wasm.Mark.prototype.add_to_set) {
-    wasm.Mark.prototype.addToSet = wasm.Mark.prototype.add_to_set;
-  }
-  if (!wasm.Mark.prototype.removeFromSet && wasm.Mark.prototype.remove_from_set) {
-    wasm.Mark.prototype.removeFromSet = wasm.Mark.prototype.remove_from_set;
-  }
-  if (!wasm.Mark.prototype.isInSet && wasm.Mark.prototype.is_in_set) {
-    wasm.Mark.prototype.isInSet = wasm.Mark.prototype.is_in_set;
-  }
-}
-
-// MarkType methods
-if (wasm.MarkType && wasm.MarkType.prototype) {
-  if (!wasm.MarkType.prototype.removeFromSet && wasm.MarkType.prototype.remove_from_set) {
-    wasm.MarkType.prototype.removeFromSet = wasm.MarkType.prototype.remove_from_set;
-  }
-  if (!wasm.MarkType.prototype.isInSet && wasm.MarkType.prototype.is_in_set) {
-    wasm.MarkType.prototype.isInSet = wasm.MarkType.prototype.is_in_set;
-  }
-}
-
-// Static methods
-if (wasm.Mark) {
-  if (!wasm.Mark.sameSet && wasm.Mark.same_set) wasm.Mark.sameSet = wasm.Mark.same_set;
-  if (!wasm.Mark.setFrom && wasm.Mark.set_from) wasm.Mark.setFrom = wasm.Mark.set_from;
-}
-if (wasm.Fragment && !wasm.Fragment.fromArray && wasm.Fragment.from_array) {
-  wasm.Fragment.fromArray = wasm.Fragment.from_array;
-}
-
-// Node methods (not getters — those are handled by patch.js type_ → type)
-if (wasm.Node && wasm.Node.prototype) {
-  const nodeMethods = [
-    ["maybeChild", "maybe_child"], ["sameMarkup", "same_markup"],
-    ["contentMatchAt", "content_match_at"], ["textBetween", "text_between"],
-    ["rangeHasMark", "range_has_mark"], ["canAppend", "can_append"],
-    ["canReplace", "can_replace"], ["canReplaceWith", "can_replace_with"],
-    ["hasMarkup", "has_markup"], ["childAfter", "child_after"],
-    ["childBefore", "child_before"], ["nodeAt", "node_at"],
-    ["nodesBetween", "nodes_between"],
-  ];
-  for (const [camel, snake] of nodeMethods) {
-    if (!wasm.Node.prototype[camel] && typeof wasm.Node.prototype[snake] === "function") {
-      wasm.Node.prototype[camel] = wasm.Node.prototype[snake];
-    }
-  }
-}
 
 // ResolvedPos methods
 if (wasm.ResolvedPos && wasm.ResolvedPos.prototype) {
@@ -459,59 +366,19 @@ if (wasm.ResolvedPos && wasm.ResolvedPos.prototype) {
       writable: true,
     });
   }
-  if (!wasm.ResolvedPos.prototype.marksAcross && wasm.ResolvedPos.prototype.marks_across) {
-    wasm.ResolvedPos.prototype.marksAcross = wasm.ResolvedPos.prototype.marks_across;
-  }
-  if (!wasm.ResolvedPos.prototype.sameParent && wasm.ResolvedPos.prototype.same_parent) {
-    wasm.ResolvedPos.prototype.sameParent = wasm.ResolvedPos.prototype.same_parent;
-  }
-  if (!wasm.ResolvedPos.prototype.blockRange && wasm.ResolvedPos.prototype.block_range) {
-    wasm.ResolvedPos.prototype.blockRange = wasm.ResolvedPos.prototype.block_range;
-  }
-  // posAtIndex is used by tests
-  if (!wasm.ResolvedPos.prototype.posAtIndex && wasm.ResolvedPos.prototype.pos_at_index) {
-    wasm.ResolvedPos.prototype.posAtIndex = wasm.ResolvedPos.prototype.pos_at_index;
-  }
+  // All other methods are now natively camelCase via WASM js_name
 }
 
-// ContentMatch methods
-if (wasm.ContentMatch && wasm.ContentMatch.prototype) {
-  const cmMethods = [
-    ["matchType", "match_type"], ["matchFragment", "match_fragment"],
-    ["fillBefore", "fill_before"], ["defaultType", "default_type"],
-    ["findWrapping", "find_wrapping"], ["edgeType", "edge_type"],
-    ["edgeMatch", "edge_match"],
-  ];
-  for (const [camel, snake] of cmMethods) {
-    if (!wasm.ContentMatch.prototype[camel] && typeof wasm.ContentMatch.prototype[snake] === "function") {
-      wasm.ContentMatch.prototype[camel] = wasm.ContentMatch.prototype[snake];
-    }
-  }
-}
+// ContentMatch — now natively camelCase via js_name, nothing to alias
 
-// NodeType methods
-if (wasm.NodeType && wasm.NodeType.prototype) {
-  if (!wasm.NodeType.prototype.createChecked && wasm.NodeType.prototype.create_checked) {
-    wasm.NodeType.prototype.createChecked = wasm.NodeType.prototype.create_checked;
-  }
-  if (!wasm.NodeType.prototype.createAndFill && wasm.NodeType.prototype.create_and_fill) {
-    wasm.NodeType.prototype.createAndFill = wasm.NodeType.prototype.create_and_fill;
-  }
-}
+// NodeType — now natively camelCase via js_name, nothing to alias
 
 // ---------------------------------------------------------------------------
 // Step bridging
 // ---------------------------------------------------------------------------
 if (wasm.Step_) {
   wasm.Step = wasm.Step_;
-  // toJSON already exists on Step_ prototype (it's a WASM-generated method).
-  // Only override it if it doesn't exist and a snake_case alias does.
-  if (!wasm.Step_.prototype.toJSON) {
-    wasm.Step_.prototype.toJSON = wasm.Step_.prototype.to_json || wasm.Step_.prototype.toJson;
-  }
-  if (!wasm.Step_.fromJSON) {
-    wasm.Step_.fromJSON = wasm.Step_.from_json || wasm.Step_.fromJson;
-  }
+  // toJSON and fromJSON are native via js_name = "toJSON" / "fromJSON"
 }
 
 // ---------------------------------------------------------------------------
@@ -583,19 +450,12 @@ if (wasm.Mapping_) {
 // Export
 // ---------------------------------------------------------------------------
 
-// Slice bridging — add camelCase aliases for snake_case getters/methods
+// Slice — openStart/openEnd are native; toJSON needs mapping from toJson
 if (wasm.Slice && wasm.Slice.prototype) {
-  const sliceAliases = [
-    ['openStart', 'open_start'],
-    ['openEnd', 'open_end'],
-    ['toJSON', 'to_json'],
-  ];
-  for (const [camel, snake] of sliceAliases) {
-    if (!(camel in wasm.Slice.prototype) && (snake in wasm.Slice.prototype)) {
-      const desc = Object.getOwnPropertyDescriptor(wasm.Slice.prototype, snake);
-      if (desc) {
-        Object.defineProperty(wasm.Slice.prototype, camel, desc);
-      }
+  if (!('toJSON' in wasm.Slice.prototype) && ('toJson' in wasm.Slice.prototype)) {
+    const desc = Object.getOwnPropertyDescriptor(wasm.Slice.prototype, 'toJson');
+    if (desc) {
+      Object.defineProperty(wasm.Slice.prototype, 'toJSON', desc);
     }
   }
 }
@@ -653,9 +513,9 @@ module.exports = {
   findWrapping: wasm.findWrapping,
 };
 
-// ContentMatch.parse static (WASM export is content_match_parse)
+// ContentMatch.parse static (WASM export is now contentMatchParse)
 if (wasm.ContentMatch && !wasm.ContentMatch.parse) {
-  const parseFn = wasm.contentMatchParse || wasm.content_match_parse;
+  const parseFn = wasm.contentMatchParse;
   if (parseFn) {
     wasm.ContentMatch.parse = function (expr, nodeTypes) {
       // Extract group info from NodeType values to pass to the Rust parser.
