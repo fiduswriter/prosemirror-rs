@@ -10,7 +10,7 @@
  */
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { Editor } = require("../index.js");
+const { Editor } = require("../npm/napi/index.js");
 
 // ---------------------------------------------------------------------------
 // Fixtures

@@ -10,7 +10,7 @@
 
 const { describe, test } = require("node:test");
 const assert = require("node:assert/strict");
-const { Schema, StepMap, Mapping, Transform } = require("../index.js");
+const { Schema, StepMap, Mapping, Transform } = require("../npm/napi/index.js");
 
 // ---------------------------------------------------------------------------
 // Shared schema / doc helpers

@@ -1,26 +1,24 @@
 /**
- * Copies the compiled Rust native addon to a platform-specific .node file.
+ * Copies the compiled Rust native addon to a platform-specific .node file
+ * in the npm/napi/ publish directory.
  *
- * The filename follows the napi-rs triple convention so that index.js can
- * load the correct binary at runtime.  Called automatically by `npm run build`
- * after `cargo build --release`.
+ * Called automatically by `npm run build` after `cargo build --release`.
  *
  * Environment variables (optional, used in CI):
  *   RUST_TARGET  – cross-compilation target, e.g. "aarch64-unknown-linux-gnu"
- *                  When set, the binary is looked up under
- *                  target/<RUST_TARGET>/release/ instead of target/release/.
  */
-import { cpSync, existsSync } from "fs";
+import { cpSync, existsSync, mkdirSync } from "fs";
 import { platform, arch } from "os";
 import { fileURLToPath } from "url";
 import { join, dirname } from "path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const destDir = join(__dirname, "npm", "napi");
 
-// ── Per-platform helper: shared library filename (without path) ───────────
-// Windows:   prosemirror_rs.dll      (no lib- prefix)
-// macOS:     libprosemirror_rs.dylib
-// Linux:     libprosemirror_rs.so
+// Ensure destination directory exists
+mkdirSync(destDir, { recursive: true });
+
+// Per-platform shared library filename
 function libFilename() {
   const p = platform();
   if (p === "win32") return "prosemirror_rs.dll";
@@ -28,9 +26,7 @@ function libFilename() {
   return "libprosemirror_rs.so";
 }
 
-// ── Build directory ──────────────────────────────────────────────────────
-// When cross-compiling, cargo places output under target/<rust_target>/release/
-// instead of target/release/.
+// Build directory
 function buildDir() {
   const rustTarget = process.env.RUST_TARGET;
   if (rustTarget) {
@@ -39,7 +35,7 @@ function buildDir() {
   return join(__dirname, "..", "target", "release");
 }
 
-// ── napi-rs platform triple for the output file ──────────────────────────
+// napi-rs platform triple
 function triple() {
   const p = platform();
   const a = arch();
@@ -52,14 +48,12 @@ function triple() {
 }
 
 const src = join(buildDir(), libFilename());
-const dest = join(__dirname, `prosemirror-rs.${triple()}.node`);
+const dest = join(destDir, `prosemirror-rs.${triple()}.node`);
 
 if (!existsSync(src)) {
   console.error(`ERROR: compiled artifact not found at ${src}`);
   console.error("");
-  console.error(
-    "Make sure cargo build --release completed successfully first.",
-  );
+  console.error("Make sure cargo build --release completed successfully first.");
   if (process.env.RUST_TARGET) {
     console.error(`(RUST_TARGET=${process.env.RUST_TARGET} is set)`);
   }

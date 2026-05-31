@@ -1,4 +1,4 @@
-const bindings = require("../prosemirror-rs.linux-x64-gnu.node");
+const bindings = require("../npm/napi/prosemirror-rs.linux-x64-gnu.node");
 
 const schemaRawSpecs = new WeakMap();
 

@@ -1,5 +1,5 @@
 [workspace]
-members = ["python", "node"]
+members = ["python", "node", "wasm"]
 resolver = "2"
 
 [package]

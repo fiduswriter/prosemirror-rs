@@ -24,7 +24,7 @@ const {
   ResolvedPos,
   NodeRange,
   contentMatchParse,
-} = require("../index.js");
+} = require("../npm/napi/index.js");
 
 // ---------------------------------------------------------------------------
 // Shared schema / doc fixture

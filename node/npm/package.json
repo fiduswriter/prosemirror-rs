@@ -2,39 +2,45 @@
   "name": "prosemirror-rs",
   "version": "0.4.1",
   "description": "Rust-powered drop-in replacement for prosemirror-model and prosemirror-transform — native addon in Node.js, WebAssembly everywhere else",
-  "main": "npm/napi/index.js",
-  "types": "npm/index.d.ts",
+  "license": "MIT",
   "exports": {
     ".": {
-      "node": "./npm/napi/index.js",
-      "browser": "./npm/wasm/index.js",
-      "default": "./npm/wasm/index.js"
+      "node": "./napi/index.js",
+      "browser": "./wasm/index.js",
+      "default": "./wasm/index.js"
     },
     "./model": {
-      "node": "./npm/model.js",
-      "browser": "./npm/model.js",
-      "default": "./npm/model.js"
+      "node": "./model.js",
+      "browser": "./model.js",
+      "default": "./model.js"
     },
     "./transform": {
-      "node": "./npm/transform.js",
-      "browser": "./npm/transform.js",
-      "default": "./npm/transform.js"
+      "node": "./transform.js",
+      "browser": "./transform.js",
+      "default": "./transform.js"
     }
   },
+  "types": "./index.d.ts",
   "typesVersions": {
     "*": {
-      "model": ["./npm/model.d.ts"],
-      "transform": ["./npm/transform.d.ts"]
+      "model": ["./model.d.ts"],
+      "transform": ["./transform.d.ts"]
     }
   },
   "files": [
-    "npm/"
+    "index.d.ts",
+    "model.js",
+    "model.d.ts",
+    "transform.js",
+    "transform.d.ts",
+    "dom.js",
+    "dom.d.ts",
+    "napi/index.js",
+    "napi/*.node",
+    "wasm/index.js",
+    "wasm/*.js",
+    "wasm/*.wasm"
   ],
-  "scripts": {
-    "build": "cargo build --release && node copy-artifact.mjs",
-    "test": "npm run build && node --test tests/*.test.js"
-    "test:upstream": "node run-upstream-tests.mjs"
-  },
   "keywords": [
     "prosemirror",
     "prosemirror-model",
@@ -46,7 +52,6 @@
     "wasm",
     "rust"
   ],
-  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/fiduswriter/prosemirror-rs"

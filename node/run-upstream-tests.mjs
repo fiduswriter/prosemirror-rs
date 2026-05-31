@@ -60,14 +60,14 @@ function clean() {
     let content = readFileSync(join(shimDir, file), "utf-8");
     // Rewrite the require path for the native binary
     content = content.replace(
-      /require\(['"]\.\.\/prosemirror-rs\.linux-x64-gnu\.node['"]\)/g,
+      /require\(['"]\.\.\/npm\/napi\/prosemirror-rs\.linux-x64-gnu\.node['"]\)/g,
       'require("./prosemirror-rs.linux-x64-gnu.node")',
     );
     writeFileSync(join(destShimDir, file), content, "utf-8");
   }
   // Copy native binary to temp dir root and shim dir
   const binaryName = "prosemirror-rs.linux-x64-gnu.node";
-  const binaryData = readFileSync(join(__dirname, binaryName));
+  const binaryData = readFileSync(join(__dirname, "npm", "napi", binaryName));
   writeFileSync(join(TEMP_DIR, binaryName), binaryData);
   writeFileSync(join(destShimDir, binaryName), binaryData);
 }
