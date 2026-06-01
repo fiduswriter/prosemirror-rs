@@ -28,7 +28,7 @@ function makeSchema() {
 test("Schema construction", () => {
   const schema = makeSchema();
   assert.ok(schema);
-  const nodes = schema.nodes();
+  const nodes = schema.nodes;
   assert.equal(typeof nodes, "object");
   assert.ok(nodes.paragraph);
 });
@@ -74,7 +74,7 @@ test("Fragment.from polymorphic", () => {
 
 test("ContentMatch", () => {
   const s = makeSchema();
-  const cm = s.nodes().paragraph.contentMatch();
+  const cm = s.nodes.paragraph.contentMatch;
   assert.equal(cm.validEnd, true);
 });
 
