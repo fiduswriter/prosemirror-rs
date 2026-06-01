@@ -806,19 +806,21 @@ impl Fragment {
 
     /// Find the first position at which this fragment differs from another.
     #[wasm_bindgen(js_name = findDiffStart)]
-    pub fn find_diff_start(&self, other: &Fragment) -> Option<usize> {
-        self.inner.find_diff_start(&other.inner)
+    pub fn find_diff_start(&self, other: &Fragment, pos: usize) -> Option<usize> {
+        self.inner.find_diff_start(&other.inner, pos)
     }
 
     /// Find the position and dimensions at which this fragment ends differently.
     #[wasm_bindgen(js_name = findDiffEnd)]
-    pub fn find_diff_end(&self, other: &Fragment) -> Option<JsValue> {
-        self.inner.find_diff_end(&other.inner).map(|(a, b)| {
-            let obj = Object::new();
-            Reflect::set(&obj, &JsValue::from_str("a"), &JsValue::from_f64(a as f64)).ok();
-            Reflect::set(&obj, &JsValue::from_str("b"), &JsValue::from_f64(b as f64)).ok();
-            obj.into()
-        })
+    pub fn find_diff_end(&self, other: &Fragment, pos_a: usize, pos_b: usize) -> Option<JsValue> {
+        self.inner
+            .find_diff_end(&other.inner, pos_a, pos_b)
+            .map(|(a, b)| {
+                let obj = Object::new();
+                Reflect::set(&obj, &JsValue::from_str("a"), &JsValue::from_f64(a as f64)).ok();
+                Reflect::set(&obj, &JsValue::from_str("b"), &JsValue::from_f64(b as f64)).ok();
+                obj.into()
+            })
     }
 
     /// Get the text content between two positions.

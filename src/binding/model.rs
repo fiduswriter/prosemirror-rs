@@ -534,16 +534,19 @@ impl BFragment {
         self.inner == other.inner
     }
 
-    pub fn find_diff_start(&self, other: &BFragment) -> Option<usize> {
+    pub fn find_diff_start(&self, other: &BFragment, pos: usize) -> Option<usize> {
         self.schema
-            .with_types(|| self.inner.find_diff_start(&other.inner, 0))
+            .with_types(|| self.inner.find_diff_start(&other.inner, pos))
     }
 
-    pub fn find_diff_end(&self, other: &BFragment) -> Option<(usize, usize)> {
-        self.schema.with_types(|| {
-            self.inner
-                .find_diff_end(&other.inner, self.inner.size(), other.inner.size())
-        })
+    pub fn find_diff_end(
+        &self,
+        other: &BFragment,
+        pos_a: usize,
+        pos_b: usize,
+    ) -> Option<(usize, usize)> {
+        self.schema
+            .with_types(|| self.inner.find_diff_end(&other.inner, pos_a, pos_b))
     }
 
     pub fn text_between(

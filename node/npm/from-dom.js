@@ -31,7 +31,7 @@ function createDOMParser(binding) {
       this.normalizeLists = !this.tags.some(r => {
         if (!/^(ul|ol)\b/.test(r.tag) || !r.node) return false;
         let node = schema.nodes[r.node];
-        return node.contentMatch().matchType(node);
+        return node.contentMatch.matchType(node);
       });
     }
 
@@ -145,7 +145,7 @@ function createDOMParser(binding) {
       this.marks = marks;
       this.solid = solid;
       this.options = options;
-      this.match = match || (options & OPT_OPEN_LEFT ? null : type.contentMatch());
+      this.match = match || (options & OPT_OPEN_LEFT ? null : type.contentMatch);
       this.content = [];
       this.activeMarks = Mark.none;
     }
@@ -153,11 +153,11 @@ function createDOMParser(binding) {
     findWrapping(node) {
       if (!this.match) {
         if (!this.type) return [];
-        let fill = this.type.contentMatch().fillBefore(Fragment.from([node]), false);
+        let fill = this.type.contentMatch.fillBefore(Fragment.from([node]), false);
         if (fill) {
-          this.match = this.type.contentMatch().matchFragment(fill);
+          this.match = this.type.contentMatch.matchFragment(fill);
         } else {
-          let start = this.type.contentMatch(), wrap;
+          let start = this.type.contentMatch, wrap;
           if (wrap = start.findWrapping(node.type)) {
             this.match = start;
             return wrap;
@@ -203,7 +203,7 @@ function createDOMParser(binding) {
       let topOptions = wsOptionsFor(null, options.preserveWhitespace, 0) | (isOpen ? OPT_OPEN_LEFT : 0);
       if (topNode)
         topContext = new NodeContext(topNode.type, topNode.attrs, Mark.none, true,
-                                     options.topMatch || topNode.type.contentMatch(), topOptions);
+                                     options.topMatch || topNode.type.contentMatch, topOptions);
       else if (isOpen)
         topContext = new NodeContext(null, null, Mark.none, true, null, topOptions);
       else
@@ -592,7 +592,7 @@ function createDOMParser(binding) {
           if (seen.indexOf(next) < 0 && scan(next)) return true;
         }
       };
-      if (scan(parent.contentMatch())) return true;
+      if (scan(parent.contentMatch)) return true;
     }
   }
 
