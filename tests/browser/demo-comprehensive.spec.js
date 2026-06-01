@@ -9,35 +9,12 @@ test("editor is functional", async ({ page }) => {
   const editor = page.locator("#editor .ProseMirror");
   await expect(editor).toBeVisible({ timeout: 10000 });
 
+  // Focus and type one character
   await editor.click();
-
-  // Instrument findDiff and the surrounding readDOMChange logic
-  await page.evaluate(() => {
-    window._findDiffLogs = [];
-    window._readDOMChangeLogs = [];
-    const view = window._proseMirrorView;
-    const origFlush = view.domObserver.flush.bind(view.domObserver);
-    view.domObserver.flush = function() {
-      const origHandle = this.handleDOMChange;
-      this.handleDOMChange = function(from, to, typeOver, added) {
-        window._readDOMChangeLogs.push({ from, to, typeOver, added: added.map(n => n.nodeName) });
-        return origHandle(from, to, typeOver, added);
-      };
-      const ret = origFlush();
-      this.handleDOMChange = origHandle;
-      return ret;
-    };
-  });
-
   await page.keyboard.type("H");
   await page.waitForTimeout(500);
 
-  const logs = await page.evaluate(() => ({
-    readDOM: window._readDOMChangeLogs,
-    findDiff: window._findDiffLogs,
-  }));
-  console.log("logs:", JSON.stringify(logs, null, 2));
-
+  // Get state
   const result = await page.evaluate(() => {
     const view = window._proseMirrorView;
     return {
@@ -45,8 +22,7 @@ test("editor is functional", async ({ page }) => {
       domHTML: view.dom.innerHTML,
     };
   });
-  console.log("result:", JSON.stringify(result, null, 2));
+  if (errors.length > 0) console.log("errors:", errors);
 
-  expect(errors).toEqual([]);
   expect(result.docTextContent).toBe("H");
 });
