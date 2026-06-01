@@ -128,24 +128,132 @@ function patchStatics(binding) {
     }
   }
 
+  // -- OrderedMap-like wrapper for schema spec nodes/marks ------------------
+  function makeOrderedMapLike(obj) {
+    if (!obj || typeof obj !== "object") return obj;
+    if (obj._isOrderedMapLike) return obj;
+
+    const keys = Object.keys(obj);
+    const content = keys.map((k) => [k, obj[k]]);
+
+    const wrapped = {
+      _isOrderedMapLike: true,
+      content,
+      get size() { return content.length; },
+      get(key) { return obj[key]; },
+      find(index) { return content[index] || undefined; },
+      update(key, value) {
+        const copy = { ...obj, [key]: value };
+        return makeOrderedMapLike(copy);
+      },
+      remove(key) {
+        const copy = { ...obj };
+        delete copy[key];
+        return makeOrderedMapLike(copy);
+      },
+      addToStart(key, value) {
+        if (key in obj) return this.update(key, value);
+        const copy = { [key]: value, ...obj };
+        return makeOrderedMapLike(copy);
+      },
+      addToEnd(key, value) {
+        if (key in obj) return this.update(key, value);
+        const copy = { ...obj, [key]: value };
+        return makeOrderedMapLike(copy);
+      },
+      addBefore(place, key, value) {
+        const copy = {};
+        let placed = false;
+        for (const k of Object.keys(obj)) {
+          if (k === place) {
+            copy[key] = value;
+            placed = true;
+          }
+          copy[k] = obj[k];
+        }
+        if (!placed) copy[key] = value;
+        return makeOrderedMapLike(copy);
+      },
+      append(other) {
+        if (!other || typeof other !== "object") return this;
+        const copy = { ...obj };
+        const src = other._isOrderedMapLike ? Object.fromEntries(other.content) : other;
+        for (const k of Object.keys(src)) copy[k] = src[k];
+        return makeOrderedMapLike(copy);
+      },
+      prepend(other) {
+        if (!other || typeof other !== "object") return this;
+        const copy = {};
+        const src = other._isOrderedMapLike ? Object.fromEntries(other.content) : other;
+        for (const k of Object.keys(src)) copy[k] = src[k];
+        for (const k of Object.keys(obj)) copy[k] = obj[k];
+        return makeOrderedMapLike(copy);
+      },
+      subtract(other) {
+        const toRemove = new Set(
+          other._isOrderedMapLike ? other.content.map((e) => e[0]) : Object.keys(other)
+        );
+        const copy = {};
+        for (const k of Object.keys(obj)) {
+          if (!toRemove.has(k)) copy[k] = obj[k];
+        }
+        return makeOrderedMapLike(copy);
+      },
+      forEach(fn) {
+        for (const [k, v] of content) fn(v, k);
+      },
+      *[Symbol.iterator]() {
+        for (const entry of content) yield entry;
+      },
+    };
+    // Also expose raw keys as properties so bracket access works.
+    for (const k of keys) {
+      if (!(k in wrapped)) wrapped[k] = obj[k];
+    }
+    return wrapped;
+  }
+
   // -- Schema.cached + raw spec storage -------------------------------------
   if (Schema) {
     const OrigSchema = Schema;
+    function normalizeSpec(spec) {
+      if (!spec || typeof spec !== "object") return spec;
+      const copy = {};
+      for (const key of Object.keys(spec)) {
+        const val = spec[key];
+        if (val && val._isOrderedMapLike) {
+          // Convert OrderedMap-like back to plain object for the Rust constructor.
+          copy[key] = Object.fromEntries(val.content);
+        } else {
+          copy[key] = val;
+        }
+      }
+      return copy;
+    }
     function PatchedSchema(spec) {
       const specObj = typeof spec === "string" ? JSON.parse(spec) : spec;
+      const normalized = normalizeSpec(specObj);
       let instance;
       if (typeof spec === "string") {
         instance = new OrigSchema(spec);
       } else {
         // napi accepts objects; wasm accepts strings. Try object first.
         try {
-          instance = new OrigSchema(spec);
+          instance = new OrigSchema(normalized);
         } catch (_) {
-          instance = new OrigSchema(JSON.stringify(spec));
+          instance = new OrigSchema(JSON.stringify(normalized));
         }
       }
       instance.cached = {};
       setRawSpec(instance, specObj);
+
+      // Build a spec object that upstream code can read / mutate via
+      // OrderedMap-like APIs (e.g. schema.spec.nodes.append(...)).
+      const specClone = {};
+      for (const key in specObj) specClone[key] = specObj[key];
+      specClone.nodes = makeOrderedMapLike(specObj.nodes || {});
+      specClone.marks = makeOrderedMapLike(specObj.marks || {});
+      instance.spec = specClone;
 
       // Ensure node/mark type .schema returns this instance so spec merging
       // (which uses WeakMap identity) works correctly.
