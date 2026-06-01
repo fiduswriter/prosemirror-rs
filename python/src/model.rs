@@ -919,6 +919,15 @@ impl PyFragment {
         self.inner.child_count()
     }
 
+    #[getter]
+    fn content(&self) -> Vec<PyNode> {
+        self.inner
+            .children()
+            .into_iter()
+            .map(|n| PyNode { inner: n })
+            .collect()
+    }
+
     fn child(&self, index: usize) -> PyResult<PyNode> {
         self.inner
             .child(index)

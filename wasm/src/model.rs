@@ -734,6 +734,16 @@ impl Fragment {
         self.inner.child_count()
     }
 
+    /// Array of child nodes.
+    #[wasm_bindgen(getter)]
+    pub fn content(&self) -> Vec<Node> {
+        self.inner
+            .children()
+            .into_iter()
+            .map(|n| Node { inner: n })
+            .collect()
+    }
+
     /// Get the child at the given index, or null.
     pub fn child(&self, index: usize) -> Option<Node> {
         self.inner.child(index).map(|n| Node { inner: n })

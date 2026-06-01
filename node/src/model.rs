@@ -636,6 +636,15 @@ impl Fragment_ {
     }
 
     #[napi(getter)]
+    pub fn content(&self) -> Vec<Node_> {
+        self.inner
+            .children()
+            .into_iter()
+            .map(|n| Node_ { inner: n })
+            .collect()
+    }
+
+    #[napi(getter)]
     pub fn first_child(&self) -> Option<Node_> {
         self.inner.first_child().map(|n| Node_ { inner: n })
     }

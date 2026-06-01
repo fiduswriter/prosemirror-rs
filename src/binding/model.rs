@@ -457,6 +457,17 @@ impl BFragment {
         self.inner.child_count()
     }
 
+    pub fn children(&self) -> Vec<BNode> {
+        self.inner
+            .children()
+            .iter()
+            .map(|n| BNode {
+                schema: self.schema.clone(),
+                inner: n.clone(),
+            })
+            .collect()
+    }
+
     pub fn child(&self, index: usize) -> Option<BNode> {
         self.inner.children().get(index).map(|n| BNode {
             schema: self.schema.clone(),
