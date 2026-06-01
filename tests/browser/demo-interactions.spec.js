@@ -16,6 +16,16 @@ test("typing, Enter, and marks work without errors", async ({ page }) => {
   await page.keyboard.press("Enter");
   await page.keyboard.type("second line");
 
+  // Verify Enter created a new paragraph
+  const docState = await page.evaluate(() => {
+    const view = window._proseMirrorView;
+    return {
+      childCount: view.state.doc.content.childCount,
+      html: document.querySelector(".ProseMirror").innerHTML,
+    };
+  });
+  expect(docState.childCount).toBe(2);
+
   // Select all text and apply bold via keyboard shortcut
   await page.keyboard.press("Control+a");
   await page.keyboard.press("Control+b");

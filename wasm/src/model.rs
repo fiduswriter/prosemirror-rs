@@ -1753,7 +1753,7 @@ impl ContentMatch {
     }
 
     /// Number of outgoing edges from this state.
-    #[wasm_bindgen(js_name = edgeCount)]
+    #[wasm_bindgen(getter, js_name = edgeCount)]
     pub fn edge_count(&self) -> usize {
         self.inner.edge_count()
     }
