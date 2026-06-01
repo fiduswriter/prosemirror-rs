@@ -703,16 +703,25 @@ impl Fragment_ {
     }
 
     #[napi]
-    pub fn find_diff_start(&self, other: &Fragment_, pos: u32) -> Option<u32> {
+    pub fn find_diff_start(&self, other: &Fragment_, pos: Option<u32>) -> Option<u32> {
         self.inner
-            .find_diff_start(&other.inner, pos as usize)
+            .find_diff_start(&other.inner, pos.unwrap_or(0) as usize)
             .map(|p| p as u32)
     }
 
     #[napi]
-    pub fn find_diff_end(&self, other: &Fragment_, pos_a: u32, pos_b: u32) -> Option<DiffEnd> {
+    pub fn find_diff_end(
+        &self,
+        other: &Fragment_,
+        pos_a: Option<u32>,
+        pos_b: Option<u32>,
+    ) -> Option<DiffEnd> {
         self.inner
-            .find_diff_end(&other.inner, pos_a as usize, pos_b as usize)
+            .find_diff_end(
+                &other.inner,
+                pos_a.unwrap_or(0) as usize,
+                pos_b.unwrap_or(0) as usize,
+            )
             .map(|(a, b)| DiffEnd {
                 a: a as u32,
                 b: b as u32,

@@ -368,6 +368,9 @@ function patchStatics(binding) {
             if (s) return boundFromArray(s, []);
             throw new Error("Fragment.from() requires a schema when empty. Create a Schema first.");
           }
+          if (input instanceof NativeFragment) {
+            return input;
+          }
           if (!Array.isArray(input) && input.type !== undefined) {
             updateLastSchema(input);
             return boundFromArray(input.type.schema, [input]);

@@ -1142,21 +1142,28 @@ impl PyFragment {
         Ok(())
     }
 
-    fn find_diff_start(&self, other: &PyFragment) -> PyResult<Option<usize>> {
-        Ok(self.inner.find_diff_start(&other.inner, 0))
+    #[pyo3(signature = (other, pos=0))]
+    fn find_diff_start(&self, other: &PyFragment, pos: Option<usize>) -> PyResult<Option<usize>> {
+        Ok(self.inner.find_diff_start(&other.inner, pos.unwrap_or(0)))
     }
 
+    #[pyo3(signature = (other, pos_a=0, pos_b=0))]
     fn find_diff_end<'py>(
         &self,
         other: &PyFragment,
+        pos_a: Option<usize>,
+        pos_b: Option<usize>,
         py: Python<'py>,
     ) -> PyResult<Option<Bound<'py, PyDict>>> {
-        Ok(self.inner.find_diff_end(&other.inner, 0, 0).map(|(a, b)| {
-            let dict = PyDict::new(py);
-            dict.set_item("a", a).unwrap();
-            dict.set_item("b", b).unwrap();
-            dict
-        }))
+        Ok(self
+            .inner
+            .find_diff_end(&other.inner, pos_a.unwrap_or(0), pos_b.unwrap_or(0))
+            .map(|(a, b)| {
+                let dict = PyDict::new(py);
+                dict.set_item("a", a).unwrap();
+                dict.set_item("b", b).unwrap();
+                dict
+            }))
     }
 }
 

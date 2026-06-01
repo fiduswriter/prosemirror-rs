@@ -112,9 +112,9 @@ function clean() {
         writeFileSync(join(destWasmDir, file), readFileSync(src));
       } catch (_) { /* skip dirs */ }
     }
-    // Also copy patch.js and dom.js
+    // Also copy patch.js, dom.js, and DOM helper files
     const npmDir = join(__dirname, "npm");
-    for (const f of ["patch.js", "dom.js"]) {
+    for (const f of ["patch.js", "dom.js", "to-dom.js", "from-dom.js"]) {
       writeFileSync(join(TEMP_DIR, "npm", f), readFileSync(join(npmDir, f)));
     }
   } else {

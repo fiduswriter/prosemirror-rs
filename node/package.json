@@ -31,7 +31,7 @@
     "npm/"
   ],
   "scripts": {
-    "build": "cargo build --release && node copy-artifact.mjs",
+    "build": "cargo build --release -p prosemirror-rs-node && node copy-artifact.mjs",
     "test": "npm run build && node --test tests/*.test.js",
     "build:wasm": "cd ../wasm && wasm-pack build --target web --out-dir ../node/npm/wasm && wasm-pack build --target nodejs --out-dir ../node/npm/wasm-nodejs",
     "test:wasm": "npm run build:wasm && node --test tests/wasm-smoke.test.cjs",

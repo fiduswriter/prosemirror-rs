@@ -86,11 +86,11 @@ BridgedSchema.prototype.mark = function (typeName, attrs) {
 
 // nodeFromJson / markFromJson — tests call nodeFromJSON/markFromJSON (camelCase)
 BridgedSchema.prototype.nodeFromJson = function (json) {
-  return this._wasm.nodeFromJson(json);
+  return this._wasm.nodeFromJSON(json);
 };
 BridgedSchema.prototype.nodeFromJSON = BridgedSchema.prototype.nodeFromJson;
 BridgedSchema.prototype.markFromJson = function (json) {
-  return this._wasm.markFromJson(json);
+  return this._wasm.markFromJSON(json);
 };
 BridgedSchema.prototype.markFromJSON = BridgedSchema.prototype.markFromJson;
 
@@ -102,16 +102,18 @@ OrigSchema.fromJSON = function (spec) {
 // Add nodes/marks getters to WASM Schema so doc.type.schema.nodes works
 // (the test accesses .nodes as a property, but WASM exports it as a method)
 (function() {
-  var _origNodes = OrigSchema.prototype.nodes;
-  var _origMarks = OrigSchema.prototype.marks;
-  if (_origNodes && typeof _origNodes === "function") {
+  var nodesDesc = Object.getOwnPropertyDescriptor(OrigSchema.prototype, "nodes");
+  var marksDesc = Object.getOwnPropertyDescriptor(OrigSchema.prototype, "marks");
+  if (nodesDesc && typeof nodesDesc.get === "function") {
+    var _origNodes = nodesDesc.get;
     Object.defineProperty(OrigSchema.prototype, "nodes", {
       get: function() { return _origNodes.call(this); },
       configurable: true
     });
     OrigSchema.prototype._origNodes = _origNodes;
   }
-  if (_origMarks && typeof _origMarks === "function") {
+  if (marksDesc && typeof marksDesc.get === "function") {
+    var _origMarks = marksDesc.get;
     Object.defineProperty(OrigSchema.prototype, "marks", {
       get: function() { return _origMarks.call(this); },
       configurable: true
@@ -818,15 +820,17 @@ if (wasm.ResolvedPos && wasm.ResolvedPos.prototype) {
     });
   }
   // nodeBefore / nodeAfter: WASM has them as methods, but tests access them as properties
-  if (typeof wasm.ResolvedPos.prototype.nodeBefore === 'function') {
-    const origNodeBefore = wasm.ResolvedPos.prototype.nodeBefore;
+  const nodeBeforeDesc = Object.getOwnPropertyDescriptor(wasm.ResolvedPos.prototype, 'nodeBefore');
+  const nodeAfterDesc = Object.getOwnPropertyDescriptor(wasm.ResolvedPos.prototype, 'nodeAfter');
+  if (nodeBeforeDesc && typeof nodeBeforeDesc.get === 'function') {
+    const origNodeBefore = nodeBeforeDesc.get;
     Object.defineProperty(wasm.ResolvedPos.prototype, 'nodeBefore', {
       get: function () { return origNodeBefore.call(this); },
       configurable: true,
     });
   }
-  if (typeof wasm.ResolvedPos.prototype.nodeAfter === 'function') {
-    const origNodeAfter = wasm.ResolvedPos.prototype.nodeAfter;
+  if (nodeAfterDesc && typeof nodeAfterDesc.get === 'function') {
+    const origNodeAfter = nodeAfterDesc.get;
     Object.defineProperty(wasm.ResolvedPos.prototype, 'nodeAfter', {
       get: function () { return origNodeAfter.call(this); },
       configurable: true,

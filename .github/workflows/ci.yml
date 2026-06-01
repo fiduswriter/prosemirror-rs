@@ -127,6 +127,10 @@ jobs:
         working-directory: node
         run: npm run test:wasm
 
+      - name: Run upstream JS tests against WASM shim
+        working-directory: node
+        run: npm run test:upstream -- --wasm
+
   test-python:
     name: Python Extension
     runs-on: ubuntu-latest
