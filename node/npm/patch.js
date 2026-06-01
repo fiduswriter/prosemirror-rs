@@ -473,12 +473,14 @@ function patchStatics(binding) {
   }
 
   // -- Slice.empty ----------------------------------------------------------
-  if (Slice && !Object.getOwnPropertyDescriptor(Slice, "empty")) {
-    const isWasm = !!(NativeFragment && NativeFragment.from_array);
+  // Upstream expects Slice.empty to be a static getter returning a Slice
+  // instance. WASM/NAPI export it as a method, so we overwrite it.
+  if (Slice) {
+    delete Slice.empty;
     Object.defineProperty(Slice, "empty", {
       get() {
         let emptyFrag;
-        if (isWasm && NativeFragment.empty) {
+        if (NativeFragment.empty) {
           emptyFrag = NativeFragment.empty;
         } else {
           const fromArray = NativeFragment.fromArray || NativeFragment.from_array;
@@ -514,6 +516,12 @@ function patchStatics(binding) {
     const td = Object.getOwnPropertyDescriptor(Node.prototype, "type_");
     if (td && td.get && !Object.getOwnPropertyDescriptor(Node.prototype, "type")) {
       Object.defineProperty(Node.prototype, "type", td);
+    }
+  }
+  if (Mark && Mark.prototype) {
+    const md = Object.getOwnPropertyDescriptor(Mark.prototype, "type_");
+    if (md && md.get && !Object.getOwnPropertyDescriptor(Mark.prototype, "type")) {
+      Object.defineProperty(Mark.prototype, "type", md);
     }
   }
 

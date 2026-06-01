@@ -1025,8 +1025,13 @@ impl Node {
 
     /// The content fragment of this node.
     #[wasm_bindgen(getter)]
-    pub fn content(&self) -> Option<Fragment> {
-        self.inner.content().map(|f| Fragment { inner: f })
+    pub fn content(&self) -> Fragment {
+        Fragment {
+            inner: self
+                .inner
+                .content()
+                .unwrap_or_else(|| BFragment::empty(self.inner.schema.clone())),
+        }
     }
 
     /// The marks on this node, as an array of Mark objects.

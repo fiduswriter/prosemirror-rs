@@ -945,31 +945,7 @@ if (wasm.Slice && wasm.Slice.prototype) {
   };
 }
 
-// Slice.empty static — creates an empty slice.
-// Tests use Slice.empty as a static property (not a function).
-if (wasm.Slice) {
-  // Override the existing Slice.empty function to also work as a static value.
-  // The WASM function takes a schema argument; the JS API uses it as a constant.
-  const origEmpty = wasm.Slice.empty;
-  if (typeof origEmpty === 'function') {
-    // Replace with a getter that returns an empty slice for the last schema
-    let _emptySlice = null;
-    let _lastSchemaForEmpty = null;
-    Object.defineProperty(wasm.Slice, 'empty', {
-      get() {
-        const s = OrigFragment._lastSchema;
-        if (!_emptySlice || _lastSchemaForEmpty !== s) {
-          if (s) {
-            _emptySlice = origEmpty(s);
-            _lastSchemaForEmpty = s;
-          }
-        }
-        return _emptySlice;
-      },
-      configurable: true,
-    });
-  }
-}
+// Slice.empty is now handled by patch.js (npm/patch.js).
 
 module.exports = {
   Schema: BridgedSchema,
@@ -1034,9 +1010,4 @@ if (wasm.ContentMatch && !wasm.ContentMatch.parse) {
   }
 }
 
-// Slice static
-if (wasm.Slice) {
-  if (!wasm.Slice.empty && wasm.Slice.prototype) {
-    // Add empty as a static if not present
-  }
-}
+// Slice.empty is handled by patch.js.
