@@ -537,15 +537,74 @@ function patchStatics(binding) {
 
   // -- Transform mutating methods should return `this` for chaining -----------
   const TransformClass = binding.Transform || binding.Transform_;
+
+  // Helper: upstream passes NodeType instances in type arrays; wasm expects
+  // plain objects with a string `type` property.
+  function normalizeNodeType(t) {
+    if (t instanceof NodeType) {
+      return { type: t.name };
+    }
+    if (t && t.type instanceof NodeType) {
+      return { type: t.type.name, attrs: t.attrs };
+    }
+    return t;
+  }
+  function normalizeTypes(types) {
+    if (!types) return types;
+    return types.map(normalizeNodeType);
+  }
+
   if (TransformClass && TransformClass.prototype) {
+    // Polymorphic removeMark / removeNodeMark (accept Mark or MarkType)
+    const origRemoveMark = TransformClass.prototype.removeMark || TransformClass.prototype.remove_mark;
+    const origRemoveMarkType = TransformClass.prototype.removeMarkType || TransformClass.prototype.remove_mark_type;
+    if (origRemoveMark && origRemoveMarkType) {
+      TransformClass.prototype.removeMark = function (from, to, mark) {
+        if (mark && mark.create && !(mark instanceof Mark)) {
+          origRemoveMarkType.call(this, from, to, mark);
+        } else {
+          origRemoveMark.call(this, from, to, mark || undefined);
+        }
+        return this;
+      };
+    }
+    const origRemoveNodeMark = TransformClass.prototype.removeNodeMark || TransformClass.prototype.remove_node_mark;
+    const origRemoveNodeMarkType = TransformClass.prototype.removeNodeMarkType || TransformClass.prototype.remove_node_mark_type;
+    if (origRemoveNodeMark && origRemoveNodeMarkType) {
+      TransformClass.prototype.removeNodeMark = function (pos, mark) {
+        if (mark && mark.create && !(mark instanceof Mark)) {
+          origRemoveNodeMarkType.call(this, pos, mark);
+        } else {
+          origRemoveNodeMark.call(this, pos, mark || undefined);
+        }
+        return this;
+      };
+    }
+
+    // Normalize NodeType arguments for split and wrap
+    const origSplit = TransformClass.prototype.split || TransformClass.prototype.split;
+    if (origSplit) {
+      TransformClass.prototype.split = function (pos, depth, typesAfter) {
+        const ret = origSplit.call(this, pos, depth, normalizeTypes(typesAfter));
+        return ret === undefined ? this : ret;
+      };
+    }
+    const origWrap = TransformClass.prototype.wrap || TransformClass.prototype.wrap;
+    if (origWrap) {
+      TransformClass.prototype.wrap = function (range, wrappers) {
+        const ret = origWrap.call(this, range, normalizeTypes(wrappers));
+        return ret === undefined ? this : ret;
+      };
+    }
+
     const chainable = [
       "step", "replace", "replaceWith", "replace_with", "delete", "insert",
       "replaceRange", "replace_range", "replaceRangeWith", "replace_range_with",
-      "deleteRange", "delete_range", "lift", "join", "wrap", "split",
+      "deleteRange", "delete_range", "lift", "join",
       "setBlockType", "set_block_type", "setNodeMarkup", "set_node_markup",
       "setNodeAttribute", "set_node_attribute", "setDocAttribute", "set_doc_attribute",
-      "addNodeMark", "add_node_mark", "removeNodeMark", "remove_node_mark",
-      "addMark", "add_mark", "removeMark", "remove_mark",
+      "addNodeMark", "add_node_mark",
+      "addMark", "add_mark",
       "clearIncompatible", "clear_incompatible",
     ];
     for (const name of chainable) {
@@ -559,6 +618,14 @@ function patchStatics(binding) {
         };
       }
     }
+  }
+
+  // -- Static canSplit also needs NodeType normalization --------------------
+  const canSplitFn = binding.canSplit || binding.can_split;
+  if (canSplitFn) {
+    binding.canSplit = function canSplit(doc, pos, depth, types) {
+      return canSplitFn(doc, pos, depth, normalizeTypes(types));
+    };
   }
 
   // -- Preserve Node identity across resolve() / .doc accessors ---------------
