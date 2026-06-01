@@ -2,21 +2,26 @@
 // Re-exports everything from the wasm-pack generated module.
 // Used as the browser/bundler entry point via the package.json exports map.
 
-import init, * as wasm from "./prosemirror_rs_wasm.js";
+import init, * as wasmModule from "./prosemirror_rs_wasm.js";
 
 // Initialize the WASM module. In a browser this fetches the .wasm file
 // relative to this module. Bundlers should copy the .wasm file to the
 // output directory so that the relative URL resolves.
 await init();
 
+// ES module namespace objects have read-only properties (getters only).
+// patchStatics needs to mutate exports (e.g. replace Schema with a patched
+// constructor), so we shallow-copy into a plain object first.
+const binding = { ...wasmModule };
+
 // Apply JS-side patches (Fragment.from, Slice.empty, etc.)
 // These are shared with the napi back-end.
 import { patchStatics } from "../patch.js";
-patchStatics(wasm);
+patchStatics(binding);
 
 // Merge DOM types
 import * as dom from "../dom.js";
-const domTypes = dom.createDOMTypes(wasm);
+const domTypes = dom.createDOMTypes(binding);
 
 export const {
   Schema, Node, NodeType, Fragment, Slice, ResolvedPos, NodeRange,
@@ -31,7 +36,7 @@ export const {
   AddNodeMarkStep, RemoveNodeMarkStep,
   AttrStep, DocAttrStep,
   replaceStep,
-} = wasm;
+} = binding;
 
 export const { ReplaceError, DOMSerializer, DOMParser } = domTypes;
 

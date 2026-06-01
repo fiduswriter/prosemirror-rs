@@ -192,6 +192,7 @@ impl Schema {
     }
 
     /// All node types in this schema, keyed by name.
+    #[wasm_bindgen(getter)]
     pub fn nodes(&self) -> Result<Object, JsValue> {
         let obj = Object::new();
         for (name, idx) in &self.inner.node_type_map {
@@ -208,6 +209,7 @@ impl Schema {
     }
 
     /// All mark types in this schema, keyed by name.
+    #[wasm_bindgen(getter)]
     pub fn marks(&self) -> Result<Object, JsValue> {
         let obj = Object::new();
         for (name, idx) in &self.inner.mark_type_map {
@@ -290,7 +292,7 @@ impl Schema {
     }
 
     /// Create a node from a JSON representation.
-    #[wasm_bindgen(js_name = nodeFromJson)]
+    #[wasm_bindgen(js_name = nodeFromJSON)]
     pub fn node_from_json(&self, json: JsValue) -> Result<Node, JsValue> {
         let val = js_to_value(&json)?;
         let inner_node = self
@@ -306,7 +308,7 @@ impl Schema {
     }
 
     /// Create a mark from a JSON representation.
-    #[wasm_bindgen(js_name = markFromJson)]
+    #[wasm_bindgen(js_name = markFromJSON)]
     pub fn mark_from_json(&self, json: JsValue) -> Result<Mark, JsValue> {
         let val = js_to_value(&json)?;
         let inner_mark = self
@@ -322,7 +324,7 @@ impl Schema {
     }
 
     /// The top-level node type (typically "doc").
-    #[wasm_bindgen(js_name = topNodeType)]
+    #[wasm_bindgen(getter, js_name = topNodeType)]
     pub fn top_node_type(&self) -> Option<NodeType> {
         b_schema_top_node_type(&self.inner).map(|nt| NodeType { inner: nt })
     }
@@ -397,7 +399,7 @@ impl NodeType {
     }
 
     /// Get the ContentMatch for this node type's content expression.
-    #[wasm_bindgen(js_name = contentMatch)]
+    #[wasm_bindgen(getter, js_name = contentMatch)]
     pub fn content_match(&self) -> Option<ContentMatch> {
         self.inner
             .content_match()
@@ -519,13 +521,14 @@ impl NodeType {
     }
 
     /// Default attributes for this node type, as a JSON object.
+    #[wasm_bindgen(getter)]
     pub fn attrs(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.attrs_defaults();
         value_to_js(&val)
     }
 
     /// The set of mark types allowed by this node type (null if all marks are allowed).
-    #[wasm_bindgen(js_name = markSet)]
+    #[wasm_bindgen(getter, js_name = markSet)]
     pub fn mark_set(&self) -> Option<Array> {
         self.inner
             .mark_set()
@@ -541,6 +544,7 @@ impl NodeType {
     }
 
     /// The spec for this node type as a JSON object.
+    #[wasm_bindgen(getter)]
     pub fn spec(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.spec_json();
         value_to_js(&val)
@@ -601,6 +605,7 @@ impl MarkType {
     }
 
     /// The spec for this mark type as a JSON object.
+    #[wasm_bindgen(getter)]
     pub fn spec(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.spec_json();
         value_to_js(&val)
@@ -628,13 +633,14 @@ impl Mark {
     }
 
     /// The mark's attributes as a JSON object.
+    #[wasm_bindgen(getter)]
     pub fn attrs(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.attrs_json();
         value_to_js(&val)
     }
 
     /// JSON representation: `{type, attrs}`.
-    #[wasm_bindgen(js_name = toJson)]
+    #[wasm_bindgen(js_name = toJSON)]
     pub fn to_json(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.to_json();
         value_to_js(&val)
@@ -831,7 +837,7 @@ impl Fragment {
     }
 
     /// JSON representation of this fragment.
-    #[wasm_bindgen(js_name = toJson)]
+    #[wasm_bindgen(js_name = toJSON)]
     pub fn to_json(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.to_json();
         value_to_js(&val)
@@ -976,7 +982,7 @@ impl Slice {
     }
 
     /// JSON representation of this slice.
-    #[wasm_bindgen(js_name = toJson)]
+    #[wasm_bindgen(js_name = toJSON)]
     pub fn to_json(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.to_json();
         value_to_js(&val)
@@ -1004,6 +1010,7 @@ impl Node {
     }
 
     /// The node's attributes as a JSON object.
+    #[wasm_bindgen(getter)]
     pub fn attrs(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.attrs_json();
         value_to_js(&val)
@@ -1309,13 +1316,19 @@ impl Node {
         }
     }
 
+    /// Resolve a position without using a cache (same as `resolve` in this implementation).
+    #[wasm_bindgen(js_name = resolveNoCache)]
+    pub fn resolve_no_cache(&self, pos: usize) -> ResolvedPos {
+        self.resolve(pos)
+    }
+
     /// True if this node is equal to another.
     pub fn eq(&self, other: &Node) -> bool {
         self.inner.eq(&other.inner)
     }
 
     /// JSON representation of this node.
-    #[wasm_bindgen(js_name = toJson)]
+    #[wasm_bindgen(js_name = toJSON)]
     pub fn to_json(&self) -> Result<JsValue, JsValue> {
         let val = self.inner.to_json(false);
         value_to_js(&val)
@@ -1469,13 +1482,13 @@ impl ResolvedPos {
     }
 
     /// The node immediately before this position, if any.
-    #[wasm_bindgen(js_name = nodeBefore)]
+    #[wasm_bindgen(getter, js_name = nodeBefore)]
     pub fn node_before(&self) -> Option<Node> {
         self.inner.node_before().map(|n| Node { inner: n })
     }
 
     /// The node immediately after this position, if any.
-    #[wasm_bindgen(js_name = nodeAfter)]
+    #[wasm_bindgen(getter, js_name = nodeAfter)]
     pub fn node_after(&self) -> Option<Node> {
         self.inner.node_after().map(|n| Node { inner: n })
     }
@@ -1525,7 +1538,6 @@ impl ResolvedPos {
     }
 
     /// The marks at this position.
-    #[wasm_bindgen(getter)]
     pub fn marks(&self) -> Array {
         let marks = self.inner.marks();
         marks_to_js_array(&self.inner.schema, &marks)
@@ -1567,10 +1579,9 @@ impl ResolvedPos {
 
     /// The block range around this position, optionally extended to another.
     #[wasm_bindgen(js_name = blockRange)]
-    pub fn block_range(&self, other: Option<ResolvedPos>) -> Option<NodeRange> {
-        let other_opt: Option<&BResolvedPos> = other.as_ref().map(|rp| &rp.inner);
+    pub fn block_range(&self, other: &ResolvedPos) -> Option<NodeRange> {
         self.inner
-            .block_range(other_opt)
+            .block_range(Some(&other.inner))
             .map(|nr| NodeRange { inner: nr })
     }
 }
@@ -1588,19 +1599,31 @@ pub struct NodeRange {
 #[wasm_bindgen]
 impl NodeRange {
     /// The resolved position at the start of the range.
-    #[wasm_bindgen(getter)]
-    pub fn from(&self) -> ResolvedPos {
+    #[wasm_bindgen(getter, js_name = "$from")]
+    pub fn from_resolved(&self) -> ResolvedPos {
         ResolvedPos {
             inner: self.inner.from_resolved_pos(),
         }
     }
 
     /// The resolved position at the end of the range.
-    #[wasm_bindgen(getter)]
-    pub fn to(&self) -> ResolvedPos {
+    #[wasm_bindgen(getter, js_name = "$to")]
+    pub fn to_resolved(&self) -> ResolvedPos {
         ResolvedPos {
             inner: self.inner.to_resolved_pos(),
         }
+    }
+
+    /// The start position of the range.
+    #[wasm_bindgen(getter)]
+    pub fn from(&self) -> usize {
+        self.inner.from_pos
+    }
+
+    /// The end position of the range.
+    #[wasm_bindgen(getter)]
+    pub fn to(&self) -> usize {
+        self.inner.to_pos
     }
 
     /// The depth of the node that the range points into.

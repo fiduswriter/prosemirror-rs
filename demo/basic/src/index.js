@@ -14,18 +14,8 @@ const state = EditorState.create({
 
 const view = new EditorView(document.querySelector("#editor"), {
   state,
-  dispatchTransaction(tr) {
-    const newState = view.state.apply(tr);
-    view.updateState(newState);
-    updateContentPreview(newState);
-  },
 });
 
-function updateContentPreview(state) {
-  document.querySelector("#content").innerHTML =
-    "<strong>Document JSON:</strong><pre>" +
-    JSON.stringify(state.doc.toJSON(), null, 2) +
-    "</pre>";
-}
-
-updateContentPreview(state);
+// Expose for tests
+window._proseMirrorView = view;
+window._proseMirrorState = state;

@@ -1,6 +1,1 @@
-# Ignore wasm-pack generated files — index.js is hand-written and tracked
-prosemirror_rs_wasm.js
-prosemirror_rs_wasm.d.ts
-prosemirror_rs_wasm_bg.wasm
-prosemirror_rs_wasm_bg.wasm.d.ts
-package.json
+*

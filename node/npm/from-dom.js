@@ -30,7 +30,7 @@ function createDOMParser(binding) {
 
       this.normalizeLists = !this.tags.some(r => {
         if (!/^(ul|ol)\b/.test(r.tag) || !r.node) return false;
-        let node = schema.nodes()[r.node];
+        let node = schema.nodes[r.node];
         return node.contentMatch().matchType(node);
       });
     }
@@ -91,16 +91,16 @@ function createDOMParser(binding) {
         result.splice(i, 0, rule);
       }
 
-      for (let name in schema.marks()) {
-        let rules = schema.marks()[name].spec.parseDOM;
+      for (let name in schema.marks) {
+        let rules = schema.marks[name].spec.parseDOM;
         if (rules) rules.forEach(rule => {
           insert(rule = copy(rule));
           if (!(rule.mark || rule.ignore || rule.clearMark))
             rule.mark = name;
         });
       }
-      for (let name in schema.nodes()) {
-        let rules = schema.nodes()[name].spec.parseDOM;
+      for (let name in schema.nodes) {
+        let rules = schema.nodes[name].spec.parseDOM;
         if (rules) rules.forEach(rule => {
           insert(rule = copy(rule));
           if (!(rule.node || rule.ignore || rule.mark))
@@ -319,7 +319,7 @@ function createDOMParser(binding) {
           if (rule.clearMark)
             marks = marks.filter(m => !rule.clearMark(m));
           else
-            marks = marks.concat(this.parser.schema.marks()[rule.mark].create(rule.attrs || null));
+            marks = marks.concat(this.parser.schema.marks[rule.mark].create(rule.attrs || null));
           if (rule.consuming === false) after = rule;
           else break;
         }
@@ -330,7 +330,7 @@ function createDOMParser(binding) {
     addElementByRule(dom, rule, marks, continueAfter) {
       let sync, nodeType;
       if (rule.node) {
-        nodeType = this.parser.schema.nodes()[rule.node];
+        nodeType = this.parser.schema.nodes[rule.node];
         if (!nodeType.isLeaf) {
           let inner = this.enter(nodeType, rule.attrs || null, marks, rule.preserveWhitespace);
           if (inner) {
@@ -341,7 +341,7 @@ function createDOMParser(binding) {
           this.leafFallback(dom, marks);
         }
       } else {
-        let markType = this.parser.schema.marks()[rule.mark];
+        let markType = this.parser.schema.marks[rule.mark];
         marks = marks.concat(markType.create(rule.attrs || null));
       }
       let startIn = this.top;
@@ -548,8 +548,8 @@ function createDOMParser(binding) {
         let deflt = $context.node(d).contentMatchAt($context.indexAfter(d)).defaultType;
         if (deflt && deflt.isTextblock && deflt.defaultAttrs) return deflt;
       }
-      for (let name in this.parser.schema.nodes()) {
-        let type = this.parser.schema.nodes()[name];
+      for (let name in this.parser.schema.nodes) {
+        let type = this.parser.schema.nodes[name];
         if (type.isTextblock && type.defaultAttrs) return type;
       }
     }
@@ -580,7 +580,7 @@ function createDOMParser(binding) {
   }
 
   function markMayApply(markType, nodeType) {
-    let nodes = nodeType.schema.nodes();
+    let nodes = nodeType.schema.nodes;
     for (let name in nodes) {
       let parent = nodes[name];
       if (!parent.allowsMarkType(markType)) continue;
