@@ -20,4 +20,5 @@ __pycache__/
 test_clone
 plans/
 *.tgz
+test-results/
 node/package/
