@@ -1,6 +1,6 @@
 [package]
 name = "prosemirror-rs"
-version = "0.4.1"
+version = "0.5.0"
 authors = [
     "Johannes Wilm <johannes@fiduswriter.org>",
     "Mustafa J <mustafa.0x@gmail.com>",

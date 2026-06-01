@@ -1,6 +1,6 @@
 {
   "name": "prosemirror-rs",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Rust-powered drop-in replacement for prosemirror-model and prosemirror-transform — native addon in Node.js, WebAssembly everywhere else",
   "main": "npm/napi/index.js",
   "types": "npm/index.d.ts",
