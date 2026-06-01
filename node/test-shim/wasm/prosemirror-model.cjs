@@ -1013,9 +1013,9 @@ if (wasm.ContentMatch && !wasm.ContentMatch.parse) {
           // Try direct .group property (from plain objects)
           if (typeof val.group === 'string') {
             group = val.group;
-          } else if (typeof val.spec === 'function') {
-            // NodeType has spec() method that returns a Map or plain object
-            const spec = val.spec();
+          } else if (val.spec) {
+            // NodeType has spec property/getter that returns a Map or plain object
+            const spec = typeof val.spec === 'function' ? val.spec() : val.spec;
             if (spec) {
               if (typeof spec.get === 'function') {
                 group = spec.get('group') || '';

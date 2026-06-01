@@ -719,8 +719,8 @@ impl Fragment_ {
         self.inner
             .find_diff_end(
                 &other.inner,
-                pos_a.unwrap_or(0) as usize,
-                pos_b.unwrap_or(0) as usize,
+                pos_a.unwrap_or(self.inner.size() as u32) as usize,
+                pos_b.unwrap_or(other.inner.size() as u32) as usize,
             )
             .map(|(a, b)| DiffEnd {
                 a: a as u32,

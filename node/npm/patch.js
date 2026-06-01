@@ -457,27 +457,6 @@ function patchStatics(binding) {
     NativeFragment._fromWrapped = true;
   }
 
-  // -- Fragment.findDiffStart / findDiffEnd default position args -----------
-  if (NativeFragment && NativeFragment.prototype) {
-    const origFindDiffStart = NativeFragment.prototype.findDiffStart;
-    if (origFindDiffStart) {
-      NativeFragment.prototype.findDiffStart = function (other, pos) {
-        return origFindDiffStart.call(this, other, pos !== undefined ? pos : 0);
-      };
-    }
-    const origFindDiffEnd = NativeFragment.prototype.findDiffEnd;
-    if (origFindDiffEnd) {
-      NativeFragment.prototype.findDiffEnd = function (other, posA, posB) {
-        return origFindDiffEnd.call(
-          this,
-          other,
-          posA !== undefined ? posA : 0,
-          posB !== undefined ? posB : 0
-        );
-      };
-    }
-  }
-
   // -- Slice.empty ----------------------------------------------------------
   if (Slice && !Object.getOwnPropertyDescriptor(Slice, "empty")) {
     const isWasm = !!(NativeFragment && NativeFragment.from_array);

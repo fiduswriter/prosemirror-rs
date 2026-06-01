@@ -1147,7 +1147,7 @@ impl PyFragment {
         Ok(self.inner.find_diff_start(&other.inner, pos.unwrap_or(0)))
     }
 
-    #[pyo3(signature = (other, pos_a=0, pos_b=0))]
+    #[pyo3(signature = (other, pos_a=None, pos_b=None))]
     fn find_diff_end<'py>(
         &self,
         other: &PyFragment,
@@ -1157,7 +1157,11 @@ impl PyFragment {
     ) -> PyResult<Option<Bound<'py, PyDict>>> {
         Ok(self
             .inner
-            .find_diff_end(&other.inner, pos_a.unwrap_or(0), pos_b.unwrap_or(0))
+            .find_diff_end(
+                &other.inner,
+                pos_a.unwrap_or(self.inner.size()),
+                pos_b.unwrap_or(other.inner.size()),
+            )
             .map(|(a, b)| {
                 let dict = PyDict::new(py);
                 dict.set_item("a", a).unwrap();
