@@ -1331,6 +1331,11 @@ impl Node_ {
         }
     }
 
+    #[napi(js_name = "resolveNoCache")]
+    pub fn resolve_no_cache(&self, pos: u32) -> ResolvedPos_ {
+        self.resolve(pos)
+    }
+
     #[napi]
     pub fn eq(&self, other: &Node_) -> bool {
         self.inner.eq(&other.inner)
@@ -1616,18 +1621,28 @@ impl NodeRange_ {
 
 #[napi]
 impl NodeRange_ {
-    #[napi(getter)]
-    pub fn from(&self) -> ResolvedPos_ {
+    #[napi(getter, js_name = "$from")]
+    pub fn from_resolved(&self) -> ResolvedPos_ {
         ResolvedPos_ {
             inner: self.inner.from_resolved_pos(),
         }
     }
 
-    #[napi(getter)]
-    pub fn to(&self) -> ResolvedPos_ {
+    #[napi(getter, js_name = "$to")]
+    pub fn to_resolved(&self) -> ResolvedPos_ {
         ResolvedPos_ {
             inner: self.inner.to_resolved_pos(),
         }
+    }
+
+    #[napi(getter, js_name = "from")]
+    pub fn from_pos(&self) -> u32 {
+        self.inner.from_pos as u32
+    }
+
+    #[napi(getter, js_name = "to")]
+    pub fn to_pos(&self) -> u32 {
+        self.inner.to_pos as u32
     }
 
     #[napi(getter)]

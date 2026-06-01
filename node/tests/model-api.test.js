@@ -423,8 +423,10 @@ describe("NodeRange", () => {
     const to = doc.resolve(3);
     const range = from.blockRange(to);
     assert.ok(range instanceof NodeRange);
-    assert.ok(range.from instanceof ResolvedPos);
-    assert.ok(range.to instanceof ResolvedPos);
+    assert.ok(range.$from instanceof ResolvedPos);
+    assert.ok(range.$to instanceof ResolvedPos);
+    assert.equal(typeof range.from, "number");
+    assert.equal(typeof range.to, "number");
     assert.ok(range.parent instanceof Node);
     assert.equal(typeof range.startIndex, "number");
     assert.equal(typeof range.endIndex, "number");

@@ -1902,7 +1902,20 @@ impl PyNodeRange {
         self.inner.end_index()
     }
 
-    /// The resolved start position of this range (JS: `$from`).
+    /// The start position of this range.
+    #[getter]
+    fn from_pos(&self) -> usize {
+        self.inner.from_pos
+    }
+
+    /// The end position of this range.
+    #[getter]
+    fn to_pos(&self) -> usize {
+        self.inner.to_pos
+    }
+
+    /// The resolved start position of this range (JS: `$from`,
+    /// Python keyword-safe: `from_`).
     #[getter]
     fn from_(&self) -> PyResolvedPos {
         PyResolvedPos {
@@ -1912,7 +1925,7 @@ impl PyNodeRange {
 
     /// The resolved end position of this range (JS: `$to`).
     #[getter]
-    fn to_(&self) -> PyResolvedPos {
+    fn to(&self) -> PyResolvedPos {
         PyResolvedPos {
             inner: self.inner.to_resolved_pos(),
         }

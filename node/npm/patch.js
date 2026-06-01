@@ -7,17 +7,41 @@
 // ---------------------------------------------------------------------------
 
 const schemaSpecs = new WeakMap();
+const _allSpecs = [];
 
 function setRawSpec(schema, spec) {
   schemaSpecs.set(schema, spec);
+  _allSpecs.push(spec);
 }
 
 function getRawSpec(schema) {
   return schemaSpecs.get(schema);
 }
 
+function findSpecByNodeTypeName(name) {
+  for (const spec of _allSpecs) {
+    if (spec.nodes && spec.nodes[name]) return spec;
+  }
+  return null;
+}
+
+function findSpecByMarkTypeName(name) {
+  for (const spec of _allSpecs) {
+    if (spec.marks && spec.marks[name]) return spec;
+  }
+  return null;
+}
+
 function patchStatics(binding) {
   const { Fragment: NativeFragment, Slice, Node, Schema, NodeType, MarkType, Mark, ContentMatch } = binding;
+
+  // -- WASM snake_case → camelCase aliases for class exports ----------------
+  if (!binding.Step && binding.Step_) binding.Step = binding.Step_;
+  if (!binding.StepMap && binding.StepMap_) binding.StepMap = binding.StepMap_;
+  if (!binding.Mapping && binding.Mapping_) binding.Mapping = binding.Mapping_;
+  if (!binding.MapResult && binding.MapResult_) binding.MapResult = binding.MapResult_;
+  if (!binding.Transform && binding.Transform_) binding.Transform = binding.Transform_;
+  if (!binding.NodeRange && binding.NodeRange_) binding.NodeRange = binding.NodeRange_;
 
   // -- Mark.none ------------------------------------------------------------
   if (Mark && !Mark.none) {
@@ -107,6 +131,44 @@ function patchStatics(binding) {
       }
       instance.cached = {};
       setRawSpec(instance, specObj);
+
+      // Ensure node/mark type .schema returns this instance so spec merging
+      // (which uses WeakMap identity) works correctly.
+      if (instance.nodes) {
+        for (const name of Object.keys(instance.nodes)) {
+          const nt = instance.nodes[name];
+          if (nt) {
+            try {
+              Object.defineProperty(nt, "schema", {
+                get() { return instance; },
+                configurable: true,
+                enumerable: false,
+              });
+            } catch (_) {}
+            if (specObj && specObj.nodes && specObj.nodes[name]) {
+              nt._rawSpec = specObj.nodes[name];
+            }
+          }
+        }
+      }
+      if (instance.marks) {
+        for (const name of Object.keys(instance.marks)) {
+          const mt = instance.marks[name];
+          if (mt) {
+            try {
+              Object.defineProperty(mt, "schema", {
+                get() { return instance; },
+                configurable: true,
+                enumerable: false,
+              });
+            } catch (_) {}
+            if (specObj && specObj.marks && specObj.marks[name]) {
+              mt._rawSpec = specObj.marks[name];
+            }
+          }
+        }
+      }
+
       return instance;
     }
     PatchedSchema.prototype = OrigSchema.prototype;
@@ -144,12 +206,19 @@ function patchStatics(binding) {
         configurable: true,
       });
     } else if (specDesc && specDesc.get) {
-      // napi: spec is already a getter → wrap it
+      // napi/wasm: spec is already a getter → wrap it
       const origGet = specDesc.get;
       Object.defineProperty(NodeType.prototype, "spec", {
         get() {
           const base = origGet.call(this);
-          const raw = getRawSpec(this.schema);
+          let raw = getRawSpec(this.schema);
+          if (!raw && this._rawSpec) {
+            raw = { nodes: { [this.name]: this._rawSpec } };
+          }
+          if (!raw) {
+            raw = findSpecByNodeTypeName(this.name);
+            if (raw) raw = { nodes: { [this.name]: raw.nodes[this.name] } };
+          }
           if (raw && raw.nodes && raw.nodes[this.name]) {
             const rawSpec = raw.nodes[this.name];
             for (const key of ["toDOM", "parseDOM", "leafText", "whitespace", "linebreakReplacement", "defining", "definingForContent", "isolating", "selectable", "draggable", "code", "atom", "marks", "group", "content", "attrs"]) {
@@ -187,7 +256,14 @@ function patchStatics(binding) {
       Object.defineProperty(MarkType.prototype, "spec", {
         get() {
           const base = origGet.call(this);
-          const raw = getRawSpec(this.schema);
+          let raw = getRawSpec(this.schema);
+          if (!raw && this._rawSpec) {
+            raw = { marks: { [this.name]: this._rawSpec } };
+          }
+          if (!raw) {
+            raw = findSpecByMarkTypeName(this.name);
+            if (raw) raw = { marks: { [this.name]: raw.marks[this.name] } };
+          }
           if (raw && raw.marks && raw.marks[this.name]) {
             const rawSpec = raw.marks[this.name];
             for (const key of ["toDOM", "parseDOM", "spanning", "excludes", "group", "attrs"]) {
@@ -402,6 +478,13 @@ function patchStatics(binding) {
     const fromJson = Node.fromJson || Node.from_json;
     if (fromJson && !Node.fromJSON) Node.fromJSON = fromJson;
 
+    // WASM doesn't export a static Node.fromJSON — synthesise it from schema.nodeFromJSON
+    if (!Node.fromJSON && Schema && Schema.prototype && Schema.prototype.nodeFromJSON) {
+      Node.fromJSON = function fromJSON(schema, json) {
+        return schema.nodeFromJSON(json);
+      };
+    }
+
     const toJson = Node.prototype && (Node.prototype.toJson || Node.prototype.to_json);
     if (toJson && Node.prototype && !Node.prototype.toJSON) {
       Node.prototype.toJSON = toJson;
@@ -413,6 +496,132 @@ function patchStatics(binding) {
     const td = Object.getOwnPropertyDescriptor(Node.prototype, "type_");
     if (td && td.get && !Object.getOwnPropertyDescriptor(Node.prototype, "type")) {
       Object.defineProperty(Node.prototype, "type", td);
+    }
+  }
+
+  // -- ResolvedPos.blockRange default argument (upstream: blockRange(to = this))
+  const ResolvedPos = binding.ResolvedPos || binding.ResolvedPos_;
+  if (ResolvedPos && ResolvedPos.prototype && ResolvedPos.prototype.blockRange) {
+    const origBlockRange = ResolvedPos.prototype.blockRange;
+    ResolvedPos.prototype.blockRange = function (other) {
+      // WASM binding takes a required &ResolvedPos; default to `this` when omitted.
+      return origBlockRange.call(this, other || this);
+    };
+  }
+
+  // -- Transform mutating methods should return `this` for chaining -----------
+  const TransformClass = binding.Transform || binding.Transform_;
+  if (TransformClass && TransformClass.prototype) {
+    const chainable = [
+      "step", "replace", "replaceWith", "replace_with", "delete", "insert",
+      "replaceRange", "replace_range", "replaceRangeWith", "replace_range_with",
+      "deleteRange", "delete_range", "lift", "join", "wrap", "split",
+      "setBlockType", "set_block_type", "setNodeMarkup", "set_node_markup",
+      "setNodeAttribute", "set_node_attribute", "setDocAttribute", "set_doc_attribute",
+      "addNodeMark", "add_node_mark", "removeNodeMark", "remove_node_mark",
+      "addMark", "add_mark", "removeMark", "remove_mark",
+      "clearIncompatible", "clear_incompatible",
+    ];
+    for (const name of chainable) {
+      const orig = TransformClass.prototype[name];
+      if (orig && typeof orig === "function") {
+        TransformClass.prototype[name] = function (...args) {
+          const ret = orig.apply(this, args);
+          // If the original returns undefined (wasm void), return `this`.
+          // If it returns a value (e.g., an error or result), preserve it.
+          return ret === undefined ? this : ret;
+        };
+      }
+    }
+  }
+
+  // -- Preserve Node identity across resolve() / .doc accessors ---------------
+  // Upstream stores a reference to the document in ResolvedPos; our wasm
+  // binding clones it on every access, which breaks `!=` checks like
+  // `selection.$from.doc != tr.doc` in prosemirror-state's setSelection.
+  if (Node && Node.prototype && Node.prototype.resolve && ResolvedPos) {
+    const origResolve = Node.prototype.resolve;
+    const origResolveNoCache = Node.prototype.resolveNoCache;
+    const origDoc = Object.getOwnPropertyDescriptor(ResolvedPos.prototype, "doc");
+    const origMin = ResolvedPos.prototype.min;
+    const origMax = ResolvedPos.prototype.max;
+    if (origResolve && origDoc && origDoc.get) {
+      Node.prototype.resolve = function (pos) {
+        const rp = origResolve.call(this, pos);
+        rp._sourceDoc = this;
+        return rp;
+      };
+      if (origResolveNoCache) {
+        Node.prototype.resolveNoCache = function (pos) {
+          const rp = origResolveNoCache.call(this, pos);
+          rp._sourceDoc = this;
+          return rp;
+        };
+      }
+      if (origMin) {
+        ResolvedPos.prototype.min = function (other) {
+          const rp = origMin.call(this, other);
+          rp._sourceDoc = this._sourceDoc || other._sourceDoc;
+          return rp;
+        };
+      }
+      if (origMax) {
+        ResolvedPos.prototype.max = function (other) {
+          const rp = origMax.call(this, other);
+          rp._sourceDoc = this._sourceDoc || other._sourceDoc;
+          return rp;
+        };
+      }
+      const origNode = ResolvedPos.prototype.node;
+      const origParent = Object.getOwnPropertyDescriptor(ResolvedPos.prototype, "parent");
+      if (origNode) {
+        ResolvedPos.prototype.node = function (depth) {
+          const d = depth === undefined ? this.depth : depth;
+          if (d === 0 && this._sourceDoc !== undefined) {
+            return this._sourceDoc;
+          }
+          return origNode.call(this, depth);
+        };
+      }
+      if (origParent && origParent.get) {
+        Object.defineProperty(ResolvedPos.prototype, "parent", {
+          get() {
+            if (this.depth === 0 && this._sourceDoc !== undefined) {
+              return this._sourceDoc;
+            }
+            return origParent.get.call(this);
+          },
+          configurable: true,
+        });
+      }
+      Object.defineProperty(ResolvedPos.prototype, "doc", {
+        get() {
+          if (this._sourceDoc !== undefined) {
+            return this._sourceDoc;
+          }
+          return origDoc.get.call(this);
+        },
+        configurable: true,
+      });
+    }
+  }
+
+  // -- Cache Transform.doc so multiple accesses return the same object --------
+  // The document changes after each step, so cache keyed by steps.length.
+  if (TransformClass && TransformClass.prototype) {
+    const origTransformDoc = Object.getOwnPropertyDescriptor(TransformClass.prototype, "doc");
+    if (origTransformDoc && origTransformDoc.get) {
+      Object.defineProperty(TransformClass.prototype, "doc", {
+        get() {
+          const stepCount = this.steps ? this.steps.length : 0;
+          if (!this._docCache || this._docCacheStepCount !== stepCount) {
+            this._docCache = origTransformDoc.get.call(this);
+            this._docCacheStepCount = stepCount;
+          }
+          return this._docCache;
+        },
+        configurable: true,
+      });
     }
   }
 }
