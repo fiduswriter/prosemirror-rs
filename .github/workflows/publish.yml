@@ -241,12 +241,17 @@ jobs:
           merge-multiple: true
           path: node
 
-      - name: Download WASM artifacts
+      - name: Download WASM web artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: wasm*-bindings
-          merge-multiple: true
-          path: node/npm
+          name: wasm-bindings
+          path: node/npm/wasm
+
+      - name: Download WASM nodejs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-nodejs-bindings
+          path: node/npm/wasm-nodejs
 
       - name: List binaries
         working-directory: node
