@@ -62,3 +62,9 @@ if (!existsSync(src)) {
 
 cpSync(src, dest);
 console.log(`Copied ${src} → ${dest}`);
+
+// Also copy to the package root so CI artifact upload can find it at the
+// flat path the workflow expects.
+const ciDest = join(__dirname, `prosemirror-rs.${triple()}.node`);
+cpSync(src, ciDest);
+console.log(`Copied ${src} → ${ciDest}`);

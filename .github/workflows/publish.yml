@@ -188,14 +188,42 @@ jobs:
           name: node-binary-${{ matrix.triple }}
           path: node/prosemirror-rs.${{ matrix.triple }}.node
 
-  # ── 6. Publish all Node binaries to npm ─────────────────────────────────
+  # ── 6. Build WASM bindings (platform-independent) ────────────────────────
+  build-wasm:
+    name: Build WASM bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM bindings
+        working-directory: node
+        run: npm run build:wasm
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-bindings
+          path: node/npm/wasm
+
+      - name: Upload WASM-nodejs artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-nodejs-bindings
+          path: node/npm/wasm-nodejs
+
+  # ── 7. Publish all Node binaries to npm ─────────────────────────────────
   publish-npm:
     name: Publish to npm
     runs-on: ubuntu-latest
     environment:
       name: npm
       url: https://www.npmjs.com/package/prosemirror-rs
-    needs: [build-node-binaries]
+    needs: [build-node-binaries, build-wasm]
     permissions:
       contents: read
       id-token: write   # required for npm trusted publishing (OIDC)
@@ -213,9 +241,25 @@ jobs:
           merge-multiple: true
           path: node
 
+      - name: Download WASM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wasm*-bindings
+          merge-multiple: true
+          path: node/npm
+
       - name: List binaries
         working-directory: node
         run: ls -la prosemirror-rs.*.node
+
+      - name: Stage binaries for npm publish
+        working-directory: node
+        run: |
+          mkdir -p npm/napi
+          cp prosemirror-rs.*.node npm/napi/
+          ls -la npm/napi/prosemirror-rs.*.node
+          ls -la npm/wasm/*.wasm
+          ls -la npm/wasm-nodejs/*.wasm
 
       - name: Publish to npm
         working-directory: node
