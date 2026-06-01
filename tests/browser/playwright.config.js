@@ -24,10 +24,18 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: `python3 -m http.server 3456 --directory ${join(__dirname, "../../demo/basic/dist")}`,
-    url: "http://localhost:3456",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
-  },
+  webServer: [
+    {
+      command: `python3 -m http.server 3456 --directory ${join(__dirname, "../../demo/basic/dist")}`,
+      url: "http://localhost:3456",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120 * 1000,
+    },
+    {
+      command: `python3 -m http.server 3457 --directory ${join(__dirname, "../../demo/advanced/dist")}`,
+      url: "http://localhost:3457",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120 * 1000,
+    },
+  ],
 });

@@ -726,6 +726,20 @@ function patchStatics(binding) {
         };
       }
     }
+
+    // maybeStep returns a StepResult-like object, not a plain string/undefined.
+    const origMaybeStep = TransformClass.prototype.maybeStep || TransformClass.prototype.maybe_step;
+    if (origMaybeStep) {
+      TransformClass.prototype.maybeStep = function (step) {
+        const result = origMaybeStep.call(this, step);
+        // wasm: success => undefined, failure => string
+        // napi: success => null,     failure => string
+        if (result === undefined || result === null) {
+          return { doc: this.doc, failed: undefined };
+        }
+        return { doc: null, failed: result };
+      };
+    }
   }
 
   // -- Static canSplit also needs NodeType normalization --------------------
