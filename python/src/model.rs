@@ -1143,7 +1143,7 @@ impl PyFragment {
     }
 
     fn find_diff_start(&self, other: &PyFragment) -> PyResult<Option<usize>> {
-        Ok(self.inner.find_diff_start(&other.inner))
+        Ok(self.inner.find_diff_start(&other.inner, 0))
     }
 
     fn find_diff_end<'py>(
@@ -1151,7 +1151,7 @@ impl PyFragment {
         other: &PyFragment,
         py: Python<'py>,
     ) -> PyResult<Option<Bound<'py, PyDict>>> {
-        Ok(self.inner.find_diff_end(&other.inner).map(|(a, b)| {
+        Ok(self.inner.find_diff_end(&other.inner, 0, 0).map(|(a, b)| {
             let dict = PyDict::new(py);
             dict.set_item("a", a).unwrap();
             dict.set_item("b", b).unwrap();

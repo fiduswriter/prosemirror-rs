@@ -72,33 +72,29 @@ fn js_to_opt_str(js: &JsValue) -> Option<String> {
     }
 }
 
-fn marks_to_js_array(schema: &Arc<DynamicSchema>, marks: &[DynamicMark]) -> Array {
-    let arr = Array::new();
-    for m in marks {
-        let mark = Mark {
+fn marks_to_js_array(schema: &Arc<DynamicSchema>, marks: &[DynamicMark]) -> Vec<Mark> {
+    marks
+        .iter()
+        .map(|m| Mark {
             inner: BMark {
                 schema: schema.clone(),
                 inner: m.clone(),
             },
-        };
-        arr.push(&JsValue::from(mark));
-    }
-    arr
+        })
+        .collect()
 }
 
-fn mark_types_to_js_array(types: &[BMarkType]) -> Array {
-    let arr = Array::new();
-    for mt in types {
-        let mt_js = MarkType {
+fn mark_types_to_js_array(types: &[BMarkType]) -> Vec<MarkType> {
+    types
+        .iter()
+        .map(|mt| MarkType {
             inner: BMarkType {
                 schema: mt.schema.clone(),
                 inner: mt.inner,
                 name: mt.name.clone(),
             },
-        };
-        arr.push(&JsValue::from(mt_js));
-    }
-    arr
+        })
+        .collect()
 }
 
 fn js_to_fragment_input(
@@ -529,7 +525,7 @@ impl NodeType {
 
     /// The set of mark types allowed by this node type (null if all marks are allowed).
     #[wasm_bindgen(getter, js_name = markSet)]
-    pub fn mark_set(&self) -> Option<Array> {
+    pub fn mark_set(&self) -> Option<Vec<MarkType>> {
         self.inner
             .mark_set()
             .map(|types| mark_types_to_js_array(&types))
@@ -537,7 +533,7 @@ impl NodeType {
 
     /// Filter the given marks to only those allowed by this node type.
     #[wasm_bindgen(js_name = allowedMarks)]
-    pub fn allowed_marks(&self, marks: Vec<Mark>) -> Array {
+    pub fn allowed_marks(&self, marks: Vec<Mark>) -> Vec<Mark> {
         let dyn_marks: Vec<DynamicMark> = marks.iter().map(|m| m.inner.inner.clone()).collect();
         let filtered = self.inner.allowed_marks_filtered(dyn_marks);
         marks_to_js_array(&self.inner.schema, &filtered)
@@ -586,7 +582,7 @@ impl MarkType {
 
     /// Remove all marks of this type from the given set.
     #[wasm_bindgen(js_name = removeFromSet)]
-    pub fn remove_from_set(&self, marks: Vec<Mark>) -> Array {
+    pub fn remove_from_set(&self, marks: Vec<Mark>) -> Vec<Mark> {
         let dyn_marks: Vec<DynamicMark> = marks.iter().map(|m| m.inner.inner.clone()).collect();
         let result = self.inner.remove_from_set(dyn_marks);
         marks_to_js_array(&self.inner.schema, &result)
@@ -648,7 +644,7 @@ impl Mark {
 
     /// Add this mark to a set of marks, returning a new sorted set.
     #[wasm_bindgen(js_name = addToSet)]
-    pub fn add_to_set(&self, set: Vec<Mark>) -> Array {
+    pub fn add_to_set(&self, set: Vec<Mark>) -> Vec<Mark> {
         let dyn_marks: Vec<DynamicMark> = set.iter().map(|m| m.inner.inner.clone()).collect();
         let result = self.inner.add_to_set(dyn_marks);
         marks_to_js_array(&self.inner.schema, &result)
@@ -656,7 +652,7 @@ impl Mark {
 
     /// Remove this mark from a set of marks.
     #[wasm_bindgen(js_name = removeFromSet)]
-    pub fn remove_from_set(&self, set: Vec<Mark>) -> Array {
+    pub fn remove_from_set(&self, set: Vec<Mark>) -> Vec<Mark> {
         let dyn_marks: Vec<DynamicMark> = set.iter().map(|m| m.inner.inner.clone()).collect();
         let result = self.inner.remove_from_set(dyn_marks);
         marks_to_js_array(&self.inner.schema, &result)
@@ -684,7 +680,7 @@ impl Mark {
 
     /// Create a sorted, deduplicated mark set from an array of marks.
     #[wasm_bindgen(js_name = setFrom)]
-    pub fn set_from(schema: &Schema, marks: Vec<Mark>) -> Array {
+    pub fn set_from(schema: &Schema, marks: Vec<Mark>) -> Vec<Mark> {
         let dyn_marks: Vec<DynamicMark> = marks.iter().map(|m| m.inner.inner.clone()).collect();
         let result = BMark::set_from(&schema.inner, dyn_marks);
         marks_to_js_array(&schema.inner, &result)
@@ -1026,7 +1022,7 @@ impl Node {
 
     /// The marks on this node, as an array of Mark objects.
     #[wasm_bindgen(getter)]
-    pub fn marks(&self) -> Array {
+    pub fn marks(&self) -> Vec<Mark> {
         let marks = self.inner.marks_vec();
         marks_to_js_array(&self.inner.schema, &marks)
     }
@@ -1540,14 +1536,14 @@ impl ResolvedPos {
     }
 
     /// The marks at this position.
-    pub fn marks(&self) -> Array {
+    pub fn marks(&self) -> Vec<Mark> {
         let marks = self.inner.marks();
         marks_to_js_array(&self.inner.schema, &marks)
     }
 
     /// The marks across this position and another.
     #[wasm_bindgen(js_name = marksAcross)]
-    pub fn marks_across(&self, end: &ResolvedPos) -> Option<Array> {
+    pub fn marks_across(&self, end: &ResolvedPos) -> Option<Vec<Mark>> {
         self.inner
             .marks_across(&end.inner)
             .map(|m| marks_to_js_array(&self.inner.schema, &m))
