@@ -102,8 +102,23 @@ function patchStatics(binding) {
     // replaceStep function shim
     const TransformClass = binding.Transform || binding.Transform_;
     if (TransformClass) {
+      // Wrap constructor with a Proxy to store original doc for identity checks.
+      // Upstream expects tr.doc === doc when no steps have been applied.
+      // A plain function wrapper breaks ES class inheritance (instanceof), so
+      // we use a Proxy that intercepts construct without changing the prototype chain.
+      const OrigTransform = TransformClass;
+      const ProxyTransform = new Proxy(OrigTransform, {
+        construct(target, args, newTarget) {
+          const instance = Reflect.construct(target, args, newTarget);
+          if (args[0]) instance._origDoc = args[0];
+          return instance;
+        }
+      });
+      if (binding.Transform === OrigTransform) binding.Transform = ProxyTransform;
+      if (binding.Transform_ === OrigTransform) binding.Transform_ = ProxyTransform;
+
       binding.replaceStep = function replaceStep(doc, from, to, slice) {
-        const tr = new TransformClass(doc);
+        const tr = new ProxyTransform(doc);
         tr.replace(from, to !== undefined ? to : from, slice !== undefined ? slice : Slice.empty);
         for (const step of tr.steps) {
           if (step instanceof ReplaceStep) return step;
@@ -609,19 +624,37 @@ function patchStatics(binding) {
     }
   }
 
-  // -- Cache Transform.doc so multiple accesses return the same object --------
-  // The document changes after each step, so cache keyed by steps.length.
+  // -- Cache Transform.doc / before so empty transforms preserve identity ----
+  // The WASM binding clones the document on every access. Upstream code
+  // expects tr.doc === doc (and tr.before === doc) when no steps have been
+  // applied. The constructor wrapper above stores _origDoc for this.
   if (TransformClass && TransformClass.prototype) {
     const origTransformDoc = Object.getOwnPropertyDescriptor(TransformClass.prototype, "doc");
     if (origTransformDoc && origTransformDoc.get) {
       Object.defineProperty(TransformClass.prototype, "doc", {
         get() {
           const stepCount = this.steps ? this.steps.length : 0;
+          if (stepCount === 0 && this._origDoc !== undefined) {
+            return this._origDoc;
+          }
           if (!this._docCache || this._docCacheStepCount !== stepCount) {
             this._docCache = origTransformDoc.get.call(this);
             this._docCacheStepCount = stepCount;
           }
           return this._docCache;
+        },
+        configurable: true,
+      });
+    }
+    const origTransformBefore = Object.getOwnPropertyDescriptor(TransformClass.prototype, "before");
+    if (origTransformBefore && origTransformBefore.get) {
+      Object.defineProperty(TransformClass.prototype, "before", {
+        get() {
+          const stepCount = this.steps ? this.steps.length : 0;
+          if (stepCount === 0 && this._origDoc !== undefined) {
+            return this._origDoc;
+          }
+          return origTransformBefore.get.call(this);
         },
         configurable: true,
       });
